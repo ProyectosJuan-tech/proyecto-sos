@@ -1,0 +1,104 @@
+# ============================================
+# SECRETS — NUNCA COMITEAR
+# ============================================
+*pexels_key.txt
+*freeai_key.txt
+*hf_token.txt
+*cf_account_id.txt
+*cf_token.txt
+*gemini_key.txt
+*pollinations_key.txt
+*.env
+.env.*
+
+# ============================================
+# MEDIA GENERADA
+# ============================================
+videos/
+VIDEOS_YOUTUBE/
+VIDEOS_YOUTUBE_PARA_SUBIR/
+VIDEOS_FACE_PARA_SUBIR/
+SABIAS_QUE/
+Escenas/
+IMAGENES_PARA_VIDEOS/
+FOTOS_FEDE/
+MINIATURAS/
+speedpainter/
+imagenes_videos_para_usar_en_videos/
+
+# ============================================
+# CEREBRO COMPLETO
+# ============================================
+cerebro/
+
+# ============================================
+# DASHBOARD COMPLETO
+# ============================================
+dashboard/
+
+# ============================================
+# ASSETS (brand, icons, fonts, logos)
+# ============================================
+assets/
+
+# ============================================
+# OPENCODE (skills, config)
+# ============================================
+.opencode/
+
+# ============================================
+# DATOS PERSONALES / ANALYTICS
+# ============================================
+*.csv
+INVENTARIO_SUBIDA.md
+Contenido_youtube_Fede/
+frases_inventario.csv
+
+# ============================================
+# CONFIGURACIÓN PERSONAL
+# ============================================
+.obsidian/
+AGENTS.md
+
+# ============================================
+# SESSION ARTIFACTS / HISTORIAL
+# ============================================
+scripts_sesion/
+textos_generados/
+
+# ============================================
+# REFERENCIAS VISUALES — solo .md, no imágenes
+# ============================================
+referencias_visuales/objects/*.jpg
+referencias_visuales/objects/*.png
+referencias_visuales/thumbnails/*.jpg
+referencias_visuales/thumbnails/*.png
+
+# ============================================
+# CACHE / BUILD / TEMP
+# ============================================
+__pycache__/
+**/__pycache__/
+*.pyc
+node_modules/
+tmp/
+**/tmp/
+
+# ============================================
+# LOGS
+# ============================================
+*.log
+
+# ============================================
+# DATOS GENERADOS REGENERABLES
+# ============================================
+*_timings.json
+*.srt
+*.npy
+
+# ============================================
+# ARCHIVOS DEL SISTEMA / STRAY
+# ============================================
+.DS_Store
+Thumbs.db
+=1.10
