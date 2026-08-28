@@ -124,6 +124,64 @@ def fetch_for_scene_landscape(query, out_path,
         return None
 
 
+def search_videos_raw(query, orientation="portrait", per_page=15, min_duration=3.0):
+    """Devuelve lista de dicts con metadata de videos de Pexels.
+
+    Cada dict contiene:
+        id, url, duration, width, height, orientation, fps,
+        file_size, thumbnail, quality, source
+
+    No filtra por orientación — devuelve todos y el caller decide.
+    Devuelve lista vacía si no hay clave o hay error.
+    """
+    key = _key()
+    if not key:
+        return []
+    try:
+        r = httpx.get(
+            API,
+            headers={"Authorization": key},
+            params={"query": query, "per_page": per_page},
+            timeout=30,
+        )
+        r.raise_for_status()
+    except Exception:
+        return []
+
+    results = []
+    for v in r.json().get("videos", []):
+        if v.get("duration", 0) < min_duration:
+            continue
+        v_width = v.get("width", 0)
+        v_height = v.get("height", 0)
+        v_orientation = "portrait" if v_height > v_width else (
+            "landscape" if v_width > v_height else "square"
+        )
+        # Seleccionar el mejor archivo de video
+        files = v.get("video_files", [])
+        if not files:
+            continue
+        # Preferir HD
+        hd_files = [f for f in files if f.get("quality") == "hd"]
+        best_files = hd_files if hd_files else files
+        best = max(best_files, key=lambda f: f.get("height", 0))
+
+        results.append({
+            "id": v.get("id"),
+            "url": best.get("link", ""),
+            "duration": v.get("duration", 0),
+            "width": best.get("width", 0),
+            "height": best.get("height", 0),
+            "orientation": v_orientation,
+            "fps": best.get("fps", 0),
+            "file_size": best.get("size", 0),
+            "thumbnail": v.get("image", ""),
+            "quality": best.get("quality", ""),
+            "source": "pexels",
+        })
+    return results
+
+
 if __name__ == "__main__":
     import sys
     print("Pexels:", "OK" if available() else "SIN CLAVE (pexels_key.txt)")

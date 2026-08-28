@@ -1,0 +1,19 @@
+# Dependencias Python del proyecto (producción de videos V2).
+# Instalar con:
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements.txt
+#
+# Requisitos de sistema (NO pip):
+#   - ffmpeg        (binario en PATH): audio, render y concat de escenas
+#   - vfxkit        (herramienta local opcional para títulos cinéticos):
+#                   vfxkit_titles.py lo usa si está en /home/juan/tools/vfxkit
+#   - fuente DejaVuSerif-Bold.ttf (para el render de texto/karaoke)
+#
+# Claves opcionales (ver README): se leen de variables de entorno o archivos
+# locales (p.ej. gemini_key.txt) que quedan FUERA del repositorio.
+
+edge-tts                 # voz TTS (jorge = es-MX-JorgeNeural)
+faster-whisper           # sync palabra-por-palabra (timings/karaoke)
+Pillow                   # render de imágenes/texto
+httpx                    # peticiones a proveedores de imagen/video/QA
+numpy                    # procesamiento numérico (equalizer/waveform)

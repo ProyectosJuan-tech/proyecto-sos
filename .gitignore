@@ -1,6 +1,7 @@
 # ============================================
 # SECRETS — NUNCA COMITEAR
 # ============================================
+# Claves de proveedores/crítico (por archivo y genérico)
 *pexels_key.txt
 *freeai_key.txt
 *hf_token.txt
@@ -8,8 +9,15 @@
 *cf_token.txt
 *gemini_key.txt
 *pollinations_key.txt
+*_key.txt
+*.key
+*.pem
+secrets/
+credentials/
+tokens/
 *.env
 .env.*
+.env
 
 # ============================================
 # MEDIA GENERADA
@@ -39,7 +47,19 @@ dashboard/
 # ============================================
 # ASSETS (brand, icons, fonts, logos)
 # ============================================
-assets/
+# Todo assets/ es privado, PERO se publica el example reproducible de brand
+# config (sin secretos). Se re-incluye paso a paso porque la carpeta está
+# ignorada por completo.
+assets/*
+!assets/brand/
+assets/brand/*
+!assets/brand/brand.config.example.json
+
+# ============================================
+# ARTEFACTOS GENERADOS DE PRODUCCIÓN (V2.2 run outputs)
+# ============================================
+pruebas_v22/*.report.md
+pruebas_v22/reports_v22.json
 
 # ============================================
 # OPENCODE (skills, config)

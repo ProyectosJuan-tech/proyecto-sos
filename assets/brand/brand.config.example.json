@@ -1,0 +1,85 @@
+{
+  "brand": {
+    "title_font": "Anton",
+    "subtitle_font": "Georgia",
+    "cta_font": "Inter Display SemiBold",
+    "cta_logo": "assets/brand/cta/logos/suscribite_youtube.png",
+    "title_color": "#E52323",
+    "subtitle_color": "#FFF7E8",
+    "accent_color": "#D9A441",
+    "shadow_color": "#14100D"
+  },
+  "language": {
+    "default": "es_neutro_lat",
+    "register": "conversational",
+    "pronombre": "tu",
+    "voseo_default": false,
+    "regionalismos_default": false,
+    "preferir": ["quieres", "puedes", "suscríbete", "sigue", "deja", "siente"],
+    "evitar": ["querés", "podés", "suscribite", "seguí", "dejá", "sentís"]
+  },
+  "tone": {
+    "human": true,
+    "emotional": true,
+    "realista": true,
+    "cercano": true,
+    "esperanzador": true,
+    "respetuoso": true,
+    "fe_psicologia_integrada": true
+  },
+  "emotional_priority": ["comprension", "reflexion", "esperanza", "accion_posible"],
+  "emotional_avoid": ["miedo", "culpa", "presion"],
+  "forbidden_tone": [
+    "guru", "coach", "sermon", "moralismo", "culpa",
+    "formula_magica", "promesa_absoluta", "toxic_positivity",
+    "simplificacion_irresponsable", "culpabilizar_al_que_sufre"
+  ],
+  "messaging": {
+    "nada_de_guru": true,
+    "sin_sermon": true,
+    "fe_base": "para quien cree, la dimensión de fe se integra con gracia, sin moralizar ni exigir perfección; el Creador te conoce por tu nombre y te acepta como eres"
+  },
+  "cta": {
+    "presets": "assets/brand/cta/presets.json",
+    "logo": "assets/brand/cta/logos/suscribite_youtube.png",
+    "zona_y_frac": 0.855,
+    "regla": "el CTA vive debajo del título/subtítulo, no compite por atención",
+    "max_principales": 1,
+    "max_secundarios": 1,
+    "cta_text": {
+      "SUSCRIPCION_SUAVE": [
+        "Si esto te hizo sentido, suscríbete al canal.",
+        "Si esto te resonó, suscríbete al canal."
+      ],
+      "CONTINUIDAD": [
+        "Si quieres seguir encontrando contenido como este, suscríbete.",
+        "Suscríbete para seguir acompañándote en estos temas."
+      ],
+      "AYUDA": [
+        "Ayúdame suscribiéndote al canal. Es gratis."
+      ],
+      "UTILIDAD": [
+        "Si sientes que esto puede ayudarte, suscríbete.",
+        "Si esto te sirve, suscríbete para no perderte lo próximo."
+      ],
+      "MENSAJE": [
+        "Si este mensaje te llegó, puedes suscribirte al canal."
+      ],
+      "COMUNIDAD": [
+        "Suscríbete si quieres que sigamos hablando de estas cosas.",
+        "Únete a la conversación en los comentarios."
+      ],
+      "FE_COMUNIDAD": [
+        "Si quieres seguir encontrando mensajes como este, suscríbete al canal."
+      ],
+      "ORACION": [
+        "Si quieres, puedes dejar tu pedido de oración en los comentarios.",
+        "Puedes dejar una intención en los comentarios si quieres."
+      ],
+      "INTERACCION": [
+        "¿Te ha pasado algo parecido? Cuéntamelo en los comentarios.",
+        "Déjame en los comentarios qué situación te cuesta soltar."
+      ]
+    }
+  }
+}

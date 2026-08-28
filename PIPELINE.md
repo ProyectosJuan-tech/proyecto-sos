@@ -79,3 +79,83 @@ audiencia → alimentar de vuelta `cerebro/wiki/contenido/` (estudios) y
   y sus gates downstream (ej: cambiar una imagen → GATE 4-7).
 - Los cambios globales de pipeline se prueban SOLO en el video en curso
   (regla existente de AGENTS.md).
+
+---
+
+# PIPELINE V2 — PRODUCCIÓN AUTOMATIZADA (PRODUCTION INTELLIGENCE)
+
+A partir de la fase V2 existe una vía automatizada que toma una instrucción
+sencilla y resuelve automáticamente las decisiones editoriales recurrentes.
+NO reemplaza el pipeline clásico: es una capa que lo orquesta.
+
+## Cadena V2 (automatizada)
+
+```
+IDEA
+→ PROPUESTA DE GUION
+→ (GATE 1 aprobación — sigue siendo humano) 
+→ CONTENT PLAN          (produce_editorial: arco corto/largo por formato)
+→ SCENE BRIEFS          (rol narrativo por escena: hook, problem, agitation…)
+→ NARRATIVE VISUAL DIRECTOR   (visual_event observable desde el texto)
+→ ASSET INTELLIGENCE    (asset_selector: queries + selección Pexels)
+→ TEXT LAYOUT           (text_layout: layout/karaoke por canvas)
+→ RENDER                (render_adapter.render_emission → MP4)
+→ QA                    (ffprobe técnico + opcional visual_critic)
+→ MP4 + PRODUCTION REPORT (automático: tema/formato/duracion/CTA/QA/fallbacks)
+```
+
+## Capas V2 (módulos)
+
+| Capa | Módulo | Qué hace |
+|---|---|---|
+| Identidad editorial | `production_intelligence.py` | español neutro (tuteo), anti-gurú/sermón/toxic, dimensión fe, config central `assets/brand/brand.config.json` |
+| Plataforma | `production_intelligence.py` | 9:16 → short/reel, 16:9 → long; pide plataforma si falta; estrategia sin cambiar mensaje |
+| CTA Engine | `production_intelligence.py` | biblioteca contextual (`cta.cta_text`), selección no-random + rotación, máx 1 principal + 1 secundario |
+| Orquestador | `editorial_orchestrator.py` | ContentPlan + briefs + assets + layouts + scene_dicts |
+| Director visual narrativo | `narrative_visual_director.py` | visual_event por rol, anti-repetición |
+| Render | `render_adapter.py` | `render_emission` → MP4 (vertical/horizontal) |
+| Reporte | `production_intelligence.py` | `ProductionReport` + `ProductionReport.error` |
+
+## Cómo ejecutar una producción (V2)
+
+```bash
+# Una sola producción (CLI), con render real:
+/home/juan/tools/tts-venv/bin/python3 production_intelligence.py \
+  --tema "poner limites" \
+  --idea "aprender a decir no sin culpa" \
+  --plataforma youtube \      # youtube | facebook | ambas  (si falta, pregunta)
+  --tipo short \              # short (9:16) | video (16:9)
+  [--cta "texto personal"]    # CTA propio (gana sobre el engine)
+  [--sin-cta]                 # desactiva el CTA
+  [--no-render]               # solo genera el plan, no el MP4
+  [--dev]                     # incluye git status/diff en el reporte
+```
+
+```bash
+# Dos producciones de ejemplo extremo a extremo (driver):
+/home/juan/tools/tts-venv/bin/python3 pruebas_v22.py
+```
+
+## Cómo ejecutar los tests (regresión)
+
+```bash
+for t in test_scene_brief.py test_short_director.py test_asset_selector.py \
+         test_text_layout.py test_v2_05_integration.py test_v2_06_render_integration.py \
+         test_v2_1_visual_quality.py test_v2_1_1_narrative_visual.py \
+         test_v2_2_production_intelligence.py; do
+  /home/juan/tools/tts-venv/bin/python3 "$t"
+done
+```
+
+## Configuración brand
+
+- `assets/brand/brand.config.json` — LOCAL/PRIVADO (gitignored). Identidad
+  editorial, tono, mensajería fe, biblioteca de CTA.
+- `assets/brand/brand.config.example.json` — PÚBLICO, estructura reproducible
+  (sin secretos). `production_intelligence` cae a este ejemplo si el local
+  no existe, para que una instalación nueva funcione igual.
+
+## Docker / reproducción externa
+
+Ver `README.md` (raíz): instalación, variables de entorno y claves opcionales.
+
