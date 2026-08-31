@@ -43,12 +43,45 @@ import sys
 
 import httpx
 
+from consumption import incr  # contabilidad de consumo (auditoría de proveedores)
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 
 from ver_imagen import _creds, VISION_MODEL, ALT_MODEL  # noqa: E402
 
 DEFAULT_MIN_SCORE = 8.0
+
+# ── CONTROL DE CONSUMO (V2-FINAL) ──────────────────────────────────────────
+# Latch de "visión agotada". Cuando la cascada de visión devuelve un error
+# TERMINAL de cuota (free.ai 402 "No tokens remaining" / Cloudflare
+# "sin contenido (¿cuota agotada?)"), se marca la visión como agotada y las
+# llamadas siguientes a _ask se cortocircuitan SIN volver a golpear la red.
+# Evita quemar ~N×3×attempts llamadas condenadas por render cuando la cuota ya
+# se agotó. Es CONTROL DE CONSUMO: no cambia ningún puntaje ni regla de calidad.
+_VISION_DOWN = False
+
+
+def _vision_down() -> bool:
+    """True si la visión quedó agotada (para decisión de cortocircuito)."""
+    if os.environ.get("V2_FORCE_DISABLE_VISION", "").lower() in ("1", "true", "yes"):
+        return True
+    return _VISION_DOWN
+
+
+def _mark_vision_down(reason: str) -> None:
+    global _VISION_DOWN
+    incr("vision.quota_fail")
+    if not _VISION_DOWN:
+        _VISION_DOWN = True
+        print(f"  [visión] marcar AGOTADA: {reason}; cortocircuito para esta "
+              f"sesión (rescatar con reset_vision_down()).", flush=True)
+
+
+def reset_vision_down() -> None:
+    """Rehabilita la visión tras recuperar cuota (uso manual / por sesión)."""
+    global _VISION_DOWN
+    _VISION_DOWN = False
 
 # ---------------------------------------------------------------------------
 # PROMPTS DE EVALUACIÓN
@@ -227,6 +260,12 @@ DESIGN_HARD_CTA = {
 # ---------------------------------------------------------------------------
 
 def _ask(image_path, prompt, expect=()):
+    # CORTO CIRCUITO DE CONSUMO: si la visión ya se agotó, no volver a golpear
+    # la red (cada intento condenado cuesta 402/429 + retry de la cascada).
+    if _vision_down():
+        incr("vision.quota_fail")
+        raise RuntimeError("visión AGOTADA (cortocircuitado — no se vuelve a llamar)")
+    incr("vision.requests")
     b64 = base64.b64encode(open(image_path, "rb").read()).decode()
     acct, token = _creds()
 
@@ -266,20 +305,40 @@ def _ask(image_path, prompt, expect=()):
                 if out2 and not _incomplete(out2):
                     out = out2
             if out:
+                incr("vision.ok")
                 return model, out
             print(f"  vision {model} sin contenido (¿cuota agotada?); "
                   "probando siguiente juez...", flush=True)
         except Exception as e:  # noqa: BLE001
             print(f"  vision {model} error: {e}", flush=True)
+    _ask_maybe_down_cloudflare("cuota agotada en ambos modelos Cloudflare")
     # FALLBACK: qwen25-vl de Free.ai (cuota independiente de Cloudflare)
     try:
         from freeai_edit import describe_image
         out = describe_image(image_path, prompt)
         if out:
+            incr("vision.ok")
             return "free.ai/qwen25-vl", out
     except Exception as e:  # noqa: BLE001
         print(f"  vision free.ai error: {e}", flush=True)
+        if _is_terminal_quota(str(e)):
+            _mark_vision_down("free.ai sin tokens (402/429)")
     raise RuntimeError("ningún modelo de visión respondió")
+
+
+def _is_terminal_quota(msg: str) -> bool:
+    """Detecta un error TERMINAL de cuota en la cascada de visión."""
+    low = msg.lower()
+    return any(k in low for k in (
+        "no tokens remaining", "tokens remaining", "sin tokens", "402",
+        "429", "quota", "rate limit", "quota agotada", "exceeded"))
+
+
+# Marcar agotada también si Cloudflare devolvió "sin contenido (¿cuota agotada?)"
+# para ambos modelos (señal de cuota del proveedor) sin que free.ai responda.
+def _ask_maybe_down_cloudflare(text: str) -> None:
+    if _is_terminal_quota(text):
+        _mark_vision_down(text)
 
 
 # ---------------------------------------------------------------------------

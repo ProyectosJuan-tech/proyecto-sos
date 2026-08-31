@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Any, Optional
@@ -105,6 +106,11 @@ PENALTIES = {
     "subject_cut_off": -8,
     "repeated_scene": -12,
 }
+
+# Control de llamadas externas por selección (early-stop durá)
+MAX_QUERIES_PER_SELECTION = int(os.environ.get("SELECTOR_MAX_QUERIES", "5"))
+GOOD_ENOUGH_SCORE = float(os.environ.get("SELECTOR_GOOD_ENOUGH", "62"))
+EARLY_STOP_MIN_VALID = int(os.environ.get("SELECTOR_MIN_VALID", "2"))
 
 
 # ─────────────────────────────────────────────
@@ -755,27 +761,60 @@ def select_asset(
             queries_tried=[],
         )
 
-    # Buscar candidatos para cada query
+    # Buscar candidatos para cada query con early-stop
     all_candidates: list[AssetCandidate] = []
+    queries_tried: list[str] = []
+    best_valid_score: AssetScore | None = None
+    valid_count = 0
+    queries_exhausted = False
+
     for q in queries:
+        if len(queries_tried) >= MAX_QUERIES_PER_SELECTION:
+            queries_exhausted = True
+            break
+        queries_tried.append(q)
         raw_results = fetch_fn(q, per_page=10)
+        if not raw_results:
+            continue
+        added_valid_this_query = 0
         for raw in raw_results:
             c = AssetCandidate.from_pexels(raw)
             c.query_used = q
             c.orientation_match = (c.orientation == "portrait")
+            rejection_reason = _technical_rejection(c, brief)
+            if rejection_reason:
+                all_candidates.append(c)  # se rechaza más abajo
+                continue
             all_candidates.append(c)
+            added_valid_this_query += 1
+            s = score_candidate(c, brief, previous_assets, continuity_context)
+            if best_valid_score is None or s.total > best_valid_score.total:
+                best_valid_score = s
+            valid_count += 1
+        # Early-stop: si esta query ya aportó suficientes candidatos válidos
+        # y ya hay uno con score "good enough", no seguimos quemando cuotas.
+        if (added_valid_this_query >= EARLY_STOP_MIN_VALID
+                and best_valid_score is not None
+                and best_valid_score.total >= GOOD_ENOUGH_SCORE):
+            break
 
     if not all_candidates:
         return AssetSelection(
             status="no_candidates",
             reasons=["Pexels no devolvió candidatos para ninguna query"],
-            queries_tried=queries,
+            queries_tried=queries_tried,
         )
 
-    # Filtro técnico básico
+    # Filtro técnico básico y desdupe (los válidos ya se marcaron arriba;
+    # acá separamos rechazo técnico de los marcados)
     valid = []
     rejected = []
+    seen = set()
     for c in all_candidates:
+        key = (c.id, c.query_used)
+        if key in seen:
+            continue
+        seen.add(key)
         rejection_reason = _technical_rejection(c, brief)
         if rejection_reason:
             rejected.append((c, rejection_reason))
@@ -786,7 +825,7 @@ def select_asset(
         return AssetSelection(
             status="no_candidates",
             reasons=["todos los candidatos fallaron el filtro técnico"],
-            queries_tried=queries,
+            queries_tried=queries_tried,
             rejected_candidates=rejected,
         )
 
@@ -796,6 +835,8 @@ def select_asset(
         s = score_candidate(c, brief, previous_assets, continuity_context)
         scored.append((c, s))
 
+    # Si nos quedamos sin queries pero aún no alcanzamos el umbral, se usa
+    # el mejor candidato que tengamos (nunca más de MAX_QUERIES_PER_SELECTION).
     scored.sort(key=lambda x: x[1].total, reverse=True)
 
     # Seleccionar el mejor
@@ -811,7 +852,7 @@ def select_asset(
         ranked_candidates=scored,
         rejected_candidates=rejected,
         query_used=best_candidate.query_used,
-        queries_tried=queries,
+        queries_tried=queries_tried,
         confidence=confidence,
         status=status,
         reasons=best_score.reasons,

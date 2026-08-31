@@ -106,6 +106,7 @@ _SOURCE_TO_KEYS: dict[str, list[str]] = {
     "ai": ["ai"],
     "ai_video": ["ai_video"],
     "stock": ["stock"],
+    "photo_stock": ["photo_stock"],
     "local": ["stock_video"],
     "commons": ["q"],
 }
@@ -167,6 +168,10 @@ def scene_brief_to_render_scene_dict(
         d["q"] = brief.pexels_queries[0] if brief.pexels_queries else brief.setting
     if "stock" in source_keys:
         d["stock"] = True
+        if brief.pexels_queries:
+            d["q"] = brief.pexels_queries[0]
+    if "photo_stock" in source_keys:
+        d["photo_stock"] = True
         if brief.pexels_queries:
             d["q"] = brief.pexels_queries[0]
     if "ai_video" in source_keys:

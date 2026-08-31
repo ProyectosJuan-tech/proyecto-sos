@@ -737,6 +737,9 @@ def build_scene_local(vid_dirs, scene, idx, vk, n_scenes, rate="+0%",
     else:
         tts_text = raw_text
         emphasis_map = {}
+    tts_clean = tts_text
+    if m.has_pauses(tts_text):
+        _, _chunks, tts_clean = m.split_pauses(tts_text)
 
     wav = os.path.join(vid_dirs["audio"],
                        f"{slug}{rsfx}_{zlib.crc32(tts_text.encode())}.wav")
@@ -749,8 +752,16 @@ def build_scene_local(vid_dirs, scene, idx, vk, n_scenes, rate="+0%",
             import pexels_stock
             if pexels_stock.available():
                 q = scene.get("q") or scene.get("ai")
-                video_path = pexels_stock.fetch_for_scene(
-                    q, os.path.join(vid_dirs["imgs"], f"e{idx:02d}.mp4"))
+                dest = os.path.join(vid_dirs["imgs"], f"e{idx:02d}.mp4")
+                cached = m.buscar_recurso("mp4", q)
+                if cached:
+                    from shutil import copyfile
+                    copyfile(cached, dest)
+                    video_path = dest
+                    print(f"    video reusado del caché local: {os.path.basename(cached)}", flush=True)
+                else:
+                    video_path = pexels_stock.fetch_for_scene(q, dest)
+                    m.guardar_recurso(dest, q, "mp4")
         except Exception as e:
             print(f"    stock falló: {e}", flush=True)
             video_path = None
@@ -759,10 +770,18 @@ def build_scene_local(vid_dirs, scene, idx, vk, n_scenes, rate="+0%",
         try:
             import ai_video
             if ai_video.available():
-                video_path = ai_video.fetch_for_scene(
-                    scene.get("q") or scene["ai"],
-                    os.path.join(vid_dirs["imgs"], f"e{idx:02d}_ai.mp4"),
-                    aspect="9:16", model=scene.get("ai_model", "wan-fast"))
+                dest = os.path.join(vid_dirs["imgs"], f"e{idx:02d}_ai.mp4")
+                cached = m.buscar_recurso("mp4", scene.get("q") or scene["ai"])
+                if cached:
+                    from shutil import copyfile
+                    copyfile(cached, dest)
+                    video_path = dest
+                    print(f"    video AI reusado del caché local: {os.path.basename(cached)}", flush=True)
+                else:
+                    video_path = ai_video.fetch_for_scene(
+                        scene.get("q") or scene["ai"], dest,
+                        aspect="9:16", model=scene.get("ai_model", "wan-fast"))
+                    m.guardar_recurso(dest, scene.get("q") or scene["ai"], "mp4")
         except Exception as e:
             print(f"    ai_video falló: {e}", flush=True)
             video_path = None
@@ -779,16 +798,24 @@ def build_scene_local(vid_dirs, scene, idx, vk, n_scenes, rate="+0%",
                 from shutil import copyfile
                 copyfile(src, img_path)
         else:
-            try:
-                style = scene.get("img_style")
-                if style is None:
-                    style = LIGHT_STYLE if scene.get("light") else STYLE
-                download_ai_image(scene["ai"], img_path,
-                                  seed=scene.get("img_seed", idx * 101),
-                                  style=style)
-            except Exception as e:
-                print(f"    IA falló, uso Commons: {e}", flush=True)
-                m.download_image(scene, img_path)
+            tema = scene.get("q") or scene.get("ai")
+            cached = m.buscar_recurso("jpg", tema)
+            if cached:
+                from shutil import copyfile
+                copyfile(cached, img_path)
+                print(f"    imagen reusada del caché local: {os.path.basename(cached)}", flush=True)
+            else:
+                try:
+                    style = scene.get("img_style")
+                    if style is None:
+                        style = LIGHT_STYLE if scene.get("light") else STYLE
+                    download_ai_image(scene["ai"], img_path,
+                                      seed=scene.get("img_seed", idx * 101),
+                                      style=style)
+                except Exception as e:
+                    print(f"    IA falló, uso Commons: {e}", flush=True)
+                    m.download_image(scene, img_path)
+                m.guardar_recurso(img_path, tema, "jpg")
     m.strip_img_metadata(img_path)
     if not (scene.get("estilo") or scene.get("handdraw")):
         if bright:
@@ -839,9 +866,9 @@ def build_scene_local(vid_dirs, scene, idx, vk, n_scenes, rate="+0%",
     if os.path.exists(tj):
         timings = [tuple(x) for x in json.load(open(tj))]
     else:
-        timings = m.align_words(tts_text, wav)
+        timings = m.align_words(tts_clean, wav)
         if timings is None:
-            toks = tts_text.split()
+            toks = tts_clean.split()
             dur = m.probe_duration(wav)
             step = dur / len(toks)
             timings = [(w, i * step, (i + 1) * step) for i, w in enumerate(toks)]
@@ -870,6 +897,9 @@ def build_scene_video(vid_dirs, scene, idx, vk, n_scenes, video_path, wav, mp4, 
     else:
         tts_text = raw_text
         emphasis_map = {}
+    tts_clean = tts_text
+    if m.has_pauses(tts_text):
+        _, _chunks, tts_clean = m.split_pauses(tts_text)
 
     if not os.path.exists(wav):
         m.asyncio.run(m.tts_audio(tts_text, voice, wav, rate=rate))
@@ -878,9 +908,9 @@ def build_scene_video(vid_dirs, scene, idx, vk, n_scenes, video_path, wav, mp4, 
     if os.path.exists(tj):
         timings = [tuple(x) for x in json.load(open(tj))]
     else:
-        timings = m.align_words(tts_text, wav)
+        timings = m.align_words(tts_clean, wav)
         if timings is None:
-            toks = tts_text.split()
+            toks = tts_clean.split()
             dur = m.probe_duration(wav)
             step = dur / len(toks)
             timings = [(w, i * step, (i + 1) * step) for i, w in enumerate(toks)]
@@ -933,6 +963,7 @@ def build_video(vid):
             mixed = out + ".bgm.mp4"
             m.mix_bgm(out, bgm, mixed)
             os.replace(mixed, out)
+        m.limpiar_metadata_video(out)
         print(f"OK {out} {m.probe_duration(out):.1f}s", flush=True)
 
 
@@ -3030,6 +3061,101 @@ VIDEOS.append({
          "q": "woman walking path sunlight peaceful",
          "ai": "Woman walking on a peaceful path with warm sunlight, serene, hopeful, natural, photorealistic",
          "motion": "zoom-out"},
+    ],
+})
+
+VIDEOS.append({
+    "name": "oracion_short",
+    "bgm": True,
+    "rate": "-8%",
+    "voices": ["male"],
+    "scenes": [
+        # ESCENA 1 — ORACIÓN (Pexels VIDEO: manos pidiendo protección, del largo)
+        {"text": "Señor, aquí estoy.\n\n"
+                 "Por unos minutos, quiero detenerme y estar contigo.\n\n"
+                 "Vengo tal como estoy, con mis preocupaciones.\n\n"
+                 "Y hoy te las dejo en tus manos.",
+         "stock": True,
+         "q": "hands prayer protection",
+         "ai": "Close-up of hands together in prayer, soft warm light, tender protective mood, photorealistic, high detail",
+         "motion": "zoom-in"},
+
+        # ESCENA 2 — CTA (imagen local: hombre afro orando)
+        {"text": "Si este momento de oración te hizo bien, suscríbete.",
+         "ai": "African american man kneeling by his bed in prayer, hands together, soft warm window light, calm and reflective, photorealistic, cinematic, vertical 9:16",
+         "q": "man praying hands",
+         "motion": "zoom-in"},
+    ],
+})
+
+VIDEOS.append({
+    "name": "me-pongo-en-tus-manos",
+    "bgm": True,
+    "rate": "-8%",
+    "voices": ["male"],
+    "scenes": [
+        # ESCENA 1 — GANCHO: oración de entrega (manos abiertas, lamparita)
+        {"text": "Señor, me pongo en tus manos. [600]\n"
+                 "Cuida de mí mientras duermo.",
+         "ai": "Tight macro photograph of an elderly man's two open palms resting upward on a folded blanket beside a bed, the frame is cropped just above the wrists so the hands fill the entire image, aged weathered skin, soft warm gold bedside glow, calm trust, photorealistic, high detail, vertical 9:16 composition",
+         "q": "open palms night lamp",
+         "motion": "zoom-in",
+         "light": True},
+
+        # ESCENA 2 — FAMILIA Y HOGAR (casa de noche desde la calle, ventanas cálidas)
+        {"text": "Cuida de las personas que amo. [600]\n"
+                 "Protege mi hogar.",
+         "ai": "Photorealistic shot of a quiet house exterior at night viewed from the street, several warm golden-lit windows glowing, cozy safe home feeling, dark blue evening sky, gentle warm atmosphere, no rain, vertical 9:16 composition",
+         "q": "family photos shelf lamp night",
+         "motion": "pan-left",
+         "light": True},
+
+        # ESCENA 3 — DESCANSO Y PAZ (mujer durmiendo en paz, mano al pecho)
+        {"text": "Dale descanso a mi mente. [600]\n"
+                 "Dale paz a mi corazón.",
+         "ai": "A woman in her fifties lying peacefully in bed at night in a cozy plain bedroom, wearing a simple nightgown, eyes closed, one hand resting gently over her heart, soft warm bedside lamplight, slow calm breathing, no religious images, intimate observational photography, photorealistic, high detail, vertical 9:16 composition",
+         "q": "woman sleeping peacefully bed",
+         "motion": "zoom-out",
+         "light": True},
+
+        # ESCENA 4 — MAÑANA (cielo claro, recibir el nuevo día)
+        {"text": "Ayúdame a recibir el nuevo día como un regalo.",
+         "ai": "Sunrise over misty mountains seen through a bedroom window curtain, golden warm light flooding the room, gentle hopeful serene mood, no people, photorealistic, high detail, vertical 9:16 composition",
+         "q": "sunrise mountains window",
+         "motion": "zoom-in",
+         "light": True},
+
+        # ESCENA 5 — CONFIANZA (manos juntas en oración sobre la cama, soltando)
+        {"text": "Enséñame a confiar más en ti. [600]\n"
+                 "A preocuparme menos por aquello que no puedo controlar.",
+         "ai": "Close-up of two hands gently joined in prayer resting on a bed at night, soft warm lamplight, releasing worries with trusting calm, cozy plain bedroom, no religious objects, intimate observational photography, photorealistic, high detail, vertical 9:16 composition",
+         "q": "folded hands prayer bed",
+         "motion": "pan-right",
+         "light": True},
+
+        # ESCENA 6 — BIEN (gesto de servicio: taza de té ofrecida)
+        {"text": "A hacer el bien que sí puedo hacer. [400]\n"
+                 "A amar mejor. [400]\n"
+                 "A perdonar. [400]\n"
+                 "A agradecer.",
+         "ai": "A person's hands offering a warm cup of tea to someone else at a cozy table, soft warm kitchen light, generous kind gesture, gentle hopeful mood, faces not visible, photorealistic, high detail, vertical 9:16 composition",
+         "q": "hands offering tea kindness",
+         "motion": "zoom-in",
+         "light": True},
+
+        # ESCENA 7 — PAYOFF/CIERRE (visto de espaldas, primera luz en el horizonte)
+        {"text": "Y a recordar que nunca estoy fuera de tu mirada.",
+         "ai": "A person seen from behind standing at a bedroom window at first light of dawn, looking out at warm golden light over calm rooftops, small and held, hopeful serene mood, no religious images, intimate observational photography, photorealistic, high detail, vertical 9:16 composition",
+         "q": "person window dawn rooftop",
+         "motion": "zoom-out",
+         "light": True},
+
+        # ESCENA 8 — CTA YOUTUBE (reusa amanecer e07, sin caras; ~3s final)
+        {"text": "Si esta oración te hizo bien,\nsuscríbete.",
+         "static_text": ["SUSCRÍBETE"],
+         "reuse_img": True,
+         "motion": "zoom-in",
+         "light": True},
     ],
 })
 

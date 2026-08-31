@@ -173,7 +173,8 @@ def _layout_karaoke(timings, final, emphasis_map=None):
 
 
 def _layout_static(lines, final, start_size=96, min_size=48,
-                    line_sizes=None):
+                    line_sizes=None, font_path=None):
+    fp = font_path or FONT
     """Texto estático centrado (frases pilar) con tamaños por línea escalables."""
     md = ImageDraw.Draw(Image.new("RGB", (1, 1)))
 
@@ -196,7 +197,7 @@ def _layout_static(lines, final, start_size=96, min_size=48,
                 sz = max(32, int(base_sizes[i] * scale))
             else:
                 sz = global_size
-            font = ImageFont.truetype(FONT, sz)
+            font = ImageFont.truetype(fp, sz)
             fonts.append(font)
             line_heights.append(int(sz * 1.28))
 
@@ -209,7 +210,7 @@ def _layout_static(lines, final, start_size=96, min_size=48,
             x = (W - w) / 2
             positions.append(([(txt, 0.0, 1e12, x)], y))
             y += line_heights[i]
-        return fonts[0] if fonts else ImageFont.truetype(FONT, global_size), positions
+        return fonts[0] if fonts else ImageFont.truetype(fp, global_size), positions
 
     size = start_size
     while size > min_size:
@@ -218,7 +219,7 @@ def _layout_static(lines, final, start_size=96, min_size=48,
         scale = size / start_size if start_size else 1.0
         for i, txt in enumerate(texts):
             sz = max(32, int(base_sizes[i] * scale)) if base_sizes[i] else size
-            f = ImageFont.truetype(FONT, sz)
+            f = ImageFont.truetype(fp, sz)
             if md.textlength(txt, font=f) > W - 160:
                 fits = False
                 break
@@ -354,10 +355,11 @@ def _motion_frame(src, motion, progress, size):
 
 def render_scene(timings, bg_img, wav, out_path, final=False, motion=None,
                  text_scheme="dark", fade=0.6, crf=20, preset="medium", tune=None,
-                 static_lines=None, static_size=None, static_sizes=None,
-                 trans=None, emphasis_map=None):
+                 static_lines=None, static_size=None, static_sizes=None, font_path=None,
+                 trans=None, emphasis_map=None, pad_after=None):
     dur = probe_duration(wav)
-    total = PAD_BEFORE + dur + PAD_AFTER
+    pa = PAD_AFTER if pad_after is None else pad_after
+    total = PAD_BEFORE + dur + pa
     frames = int(math.ceil(total * FPS))
     scheme = TEXT_SCHEMES.get(text_scheme, TEXT_SCHEMES["dark"])
     white = Image.new("RGB", (W, H), (255, 255, 255))
@@ -386,6 +388,47 @@ def render_scene(timings, bg_img, wav, out_path, final=False, motion=None,
             if r > 0:
                 return frame.filter(ImageFilter.GaussianBlur(radius=r))
             return frame
+        if tstyle == "slide":
+            # Deslizamiento suave horizontal + dip-to-white (entra desde la derecha,
+            # sale hacia la derecha). Lienzo blanco para integrarse con el fade.
+            offset = int(W * (1 - p) * 0.35)
+            canvas = white.copy()
+            canvas.paste(frame, (offset, 0))
+            return Image.blend(canvas, white, (1 - p) * 0.45)
+        if tstyle == "slide-up":
+            # Deslizamiento vertical suave: entra desde abajo hacia arriba + dip.
+            offset = int(H * (1 - p) * 0.30)
+            canvas = white.copy()
+            canvas.paste(frame, (0, offset))
+            return Image.blend(canvas, white, (1 - p) * 0.45)
+        if tstyle == "fade-up":
+            # Subida sutil (más corta) + dip-to-white.
+            offset = int(H * (1 - p) * 0.12)
+            canvas = white.copy()
+            canvas.paste(frame, (0, offset))
+            return Image.blend(canvas, white, (1 - p) * 0.55)
+        if tstyle == "blur-in":
+            # Entra desenfocado hasta foco, fundiendo a blanco.
+            r = int((1 - p) * 9)
+            f = frame.filter(ImageFilter.GaussianBlur(radius=r)) if r > 0 else frame
+            return Image.blend(f, white, (1 - p) * 0.4)
+        if tstyle == "zoom-fade":
+            # Entra creciendo levemente desde menor escala + dip-to-white.
+            z = 1.0 + (1 - p) * 0.08
+            nw, nh = max(1, int(W * z)), max(1, int(H * z))
+            f = frame.resize((nw, nh), Image.LANCZOS)
+            canvas = white.copy()
+            canvas.paste(f, ((W - nw) // 2, (H - nh) // 2))
+            return Image.blend(canvas, white, (1 - p) * 0.5)
+        if tstyle == "wipe-soft":
+            # Cortinilla suave de izquierda a derecha + dip leve.
+            cut = int(W * p)
+            canvas = white.copy()
+            canvas.paste(frame.crop((0, 0, cut, H)), (0, 0))
+            return Image.blend(canvas, white, (1 - p) * 0.35)
+        if tstyle == "fade-soft":
+            # Fundido suave y tenue (más sutil que el fade normal).
+            return Image.blend(frame, white, (1 - p) * 0.4)
         # fade (dip-to-white) por defecto
         return Image.blend(frame, white, (1 - p) * 0.85)
 
@@ -406,7 +449,7 @@ def render_scene(timings, bg_img, wav, out_path, final=False, motion=None,
 
     if static_lines:
         font, positions = _layout_static(static_lines, final, static_size or 96,
-                                         line_sizes=static_sizes)
+                                         line_sizes=static_sizes, font_path=font_path)
     else:
         font, positions = _layout_karaoke(timings, final,
                                           emphasis_map=emphasis_map)
@@ -446,11 +489,12 @@ def render_scene(timings, bg_img, wav, out_path, final=False, motion=None,
 
 def render_scene_video(timings, video_path, wav, out_path, final=False,
                        text_scheme="dark", darken=0.20, fade=0.6,
-                       static_lines=None, static_size=None, static_sizes=None,
-                       trans=None, emphasis_map=None):
+                       static_lines=None, static_size=None, static_sizes=None, font_path=None,
+                       trans=None, emphasis_map=None, pad_after=None):
     """Escena con b-roll de video horizontal de fondo (loop)."""
     dur = probe_duration(wav)
-    total = PAD_BEFORE + dur + PAD_AFTER
+    pa = PAD_AFTER if pad_after is None else pad_after
+    total = PAD_BEFORE + dur + pa
     frames = int(math.ceil(total * FPS))
     scheme = TEXT_SCHEMES.get(text_scheme, TEXT_SCHEMES["dark"])
 
@@ -458,13 +502,13 @@ def render_scene_video(timings, video_path, wav, out_path, final=False,
           "crop={0}:{1},".format(W, H) +
           f"eq=brightness=-{darken:.2f}:saturation=0.9,fps={FPS}")
     dec = subprocess.Popen(
-        ["ffmpeg", "-y", "-stream_loop", "-1", "-i", video_path,
+        ["ffmpeg", "-y", "-i", video_path,
          "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
     if static_lines:
         font, positions = _layout_static(static_lines, final, static_size or 96,
-                                         line_sizes=static_sizes)
+                                         line_sizes=static_sizes, font_path=font_path)
     else:
         font, positions = _layout_karaoke(timings, final,
                                           emphasis_map=emphasis_map)
@@ -509,17 +553,32 @@ def render_scene_video(timings, video_path, wav, out_path, final=False,
             if r > 0:
                 return frame.filter(ImageFilter.GaussianBlur(radius=r))
             return frame
+        if tstyle == "slide":
+            # Deslizamiento suave horizontal + dip-to-white (entra desde la derecha,
+            # sale hacia la derecha). Lienzo blanco para integrarse con el fade.
+            offset = int(W * (1 - p) * 0.35)
+            canvas = white.copy()
+            canvas.paste(frame, (offset, 0))
+            return Image.blend(canvas, white, (1 - p) * 0.45)
         # fade (dip-to-white) por defecto
         return Image.blend(frame, white, (1 - p) * 0.85)
 
+    last_frame = None
     for fi in range(frames):
         t = fi / FPS
         raw = dec.stdout.read(frame_size)
-        if len(raw) != frame_size:
-            dec.stdout.close()
-            dec.terminate()
-            raise RuntimeError(f"video de fondo corto/fallo: {video_path}")
-        frame = Image.frombytes("RGB", (W, H), raw)
+        if len(raw) == frame_size:
+            frame = Image.frombytes("RGB", (W, H), raw)
+            last_frame = frame
+        else:
+            # El clip de fondo terminó (más corto que la escena): congelar el
+            # último frame en vez de hacer loop/brusco. El dip-to-white de
+            # transición sigue aplicándose normal sobre el frame quieto.
+            if last_frame is None:
+                dec.stdout.close()
+                dec.terminate()
+                raise RuntimeError(f"video de fondo vacío: {video_path}")
+            frame = last_frame
         if fi == 0 and not static_lines:
             _draw_text_bg(frame, positions, scheme)
         _draw_karaoke(frame, font, positions, t, scheme)

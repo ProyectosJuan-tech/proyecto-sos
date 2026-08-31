@@ -13,24 +13,50 @@ from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 import numpy as np
 import edge_tts
 
+from pipeline.tts import (
+    DEEPEN,
+    PAUSE_RE,
+    align_words,
+    has_pauses,
+    mix_boom,
+    probe_duration,
+    rate_suffix,
+    deepen_suffix,
+    split_pauses,
+    tts_audio,
+)
+from pipeline.media import (
+    commons_url,
+    generate_bgm,
+    mix_bgm,
+    norm,
+    probe_duration,
+    run,
+)
+from pipeline.scene_generation import (
+    download_image,
+    find_local_img,
+    find_local_video,
+    strip_img_metadata,
+)
+from pipeline.visual import (
+    parse_html_emphasis,
+    resolve_visual,
+)
+from pipeline.scene_art import (
+    build_bg,
+    build_bg_bright,
+    build_bg_serif,
+    make_walking,
+)
+
 
 def strip_img_metadata(path):
-    """Quita todo metadata (EXIF, GPS, cámara, comment) de una imagen. Sobreescribe el archivo."""
-    try:
-        img = Image.open(path)
-        clean = Image.new(img.mode, img.size)
-        clean.putdata(list(img.getdata()))
-        if path.endswith((".jpg", ".jpeg")):
-            clean.save(path, "JPEG", quality=95)
-        elif path.endswith(".png"):
-            clean.save(path, "PNG")
-        elif path.endswith(".webp"):
-            clean.save(path, "WEBP")
-        else:
-            clean.save(path, quality=95)
-        return path
-    except Exception:
-        return path
+    """Wrapper de compatibilidad: delega a pipeline.scene_generation."""
+    return strip_img_metadata.__wrapped__(path) if hasattr(strip_img_metadata, "__wrapped__") else __import__("pipeline.scene_generation", fromlist=["strip_img_metadata"]).strip_img_metadata(path)
+
+
+strip_img_metadata.__wrapped__ = __import__("pipeline.scene_generation", fromlist=["strip_img_metadata"]).strip_img_metadata
 
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -227,98 +253,55 @@ SCENES = [
 
 
 def run(cmd, **kw):
-    subprocess.run(cmd, check=True, **kw)
+    """Wrapper de compatibilidad: delega a pipeline.media."""
+    return run.__wrapped__(cmd, **kw) if hasattr(run, "__wrapped__") else __import__("pipeline.media", fromlist=["run"]).run(cmd, **kw)
+
+
+run.__wrapped__ = __import__("pipeline.media", fromlist=["run"]).run
 
 
 def generate_bgm(out_path, duration=300):
-    if os.path.exists(out_path) and os.path.getsize(out_path) > 5000:
-        return out_path
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi", "-i", f"sine=frequency=110:duration={duration}",
-        "-f", "lavfi", "-i", f"sine=frequency=138.59:duration={duration}",
-        "-f", "lavfi", "-i", f"sine=frequency=164.81:duration={duration}",
-        "-f", "lavfi", "-i", f"sine=frequency=220:duration={duration}",
-        "-f", "lavfi", "-i", f"anoisesrc=color=pink:amplitude=0.008:duration={duration}",
-        "-filter_complex",
-        "[0]volume=0.05,tremolo=f=0.15:d=0.5[a];"
-        "[1]volume=0.04,tremolo=f=0.11:d=0.5[b];"
-        "[2]volume=0.035,tremolo=f=0.19:d=0.5[c];"
-        "[3]volume=0.03,tremolo=f=0.13:d=0.5[d];"
-        "[4]lowpass=f=600[e];"
-        "[a][b][c][d][e]amix=inputs=5:normalize=0,lowpass=f=900,"
-        f"afade=t=in:st=0:d=3,afade=t=out:st={duration - 3}:d=3",
-        "-ar", "24000", "-ac", "1", out_path,
-    ]
-    run(cmd)
-    return out_path
+    """Wrapper de compatibilidad: delega a pipeline.media."""
+    return generate_bgm.__wrapped__(out_path, duration=duration) if hasattr(generate_bgm, "__wrapped__") else __import__("pipeline.media", fromlist=["generate_bgm"]).generate_bgm(out_path, duration=duration)
+
+
+generate_bgm.__wrapped__ = __import__("pipeline.media", fromlist=["generate_bgm"]).generate_bgm
 
 
 def mix_bgm(video_in, bgm_path, out_path, volume=0.4):
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", video_in,
-        "-stream_loop", "-1", "-i", bgm_path,
-        "-filter_complex",
-        f"[1:a]volume={volume}[bgm];"
-        "[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2:normalize=0,"
-        "loudnorm=I=-16:TP=-1.5:LRA=11[a]",
-        "-map", "0:v", "-map", "[a]",
-        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "24000", "-ac", "1",
-        "-movflags", "+faststart", out_path,
-    ]
-    run(cmd)
-    return out_path
+    """Wrapper de compatibilidad: delega a pipeline.media."""
+    return mix_bgm.__wrapped__(video_in, bgm_path, out_path, volume=volume) if hasattr(mix_bgm, "__wrapped__") else __import__("pipeline.media", fromlist=["mix_bgm"]).mix_bgm(video_in, bgm_path, out_path, volume=volume)
+
+
+mix_bgm.__wrapped__ = __import__("pipeline.media", fromlist=["mix_bgm"]).mix_bgm
 
 
 def probe_duration(path):
-    out = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-         "-of", "csv=p=0", path],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    return float(out)
+    """Wrapper de compatibilidad: delega a pipeline.media."""
+    return probe_duration.__wrapped__(path) if hasattr(probe_duration, "__wrapped__") else __import__("pipeline.media", fromlist=["probe_duration"]).probe_duration(path)
+
+
+probe_duration.__wrapped__ = __import__("pipeline.media", fromlist=["probe_duration"]).probe_duration
 
 
 def norm(s):
-    return re.sub(r"[^a-záéíóúüñ0-9]", "", s.lower())
+    """Wrapper de compatibilidad: delega a pipeline.media."""
+    return norm.__wrapped__(s) if hasattr(norm, "__wrapped__") else __import__("pipeline.media", fromlist=["norm"]).norm(s)
+
+
+norm.__wrapped__ = __import__("pipeline.media", fromlist=["norm"]).norm
 
 
 def commons_url(params):
-    url = ("https://commons.wikimedia.org/w/api.php?action=query" + params +
-           "&prop=imageinfo&iiprop=url|size&iiurlwidth=1080&format=json")
-    req = urllib.request.Request(url, headers={"User-Agent": "video-builder/1.0"})
-    d = json.load(urllib.request.urlopen(req, timeout=40))
-    cands = []
-    for p in d.get("query", {}).get("pages", {}).values():
-        ii = p.get("imageinfo", [{}])[0]
-        u = ii.get("thumburl") or ii.get("url")
-        w, h = ii.get("width") or 0, ii.get("height") or 0
-        if u and w >= 700:
-            cands.append((w * h, u))
-    cands.sort(reverse=True)
-    return cands[0][1] if cands else None
+    """Wrapper de compatibilidad: delega a pipeline.media."""
+    return commons_url.__wrapped__(params) if hasattr(commons_url, "__wrapped__") else __import__("pipeline.media", fromlist=["commons_url"]).commons_url(params)
+
+
+commons_url.__wrapped__ = __import__("pipeline.media", fromlist=["commons_url"]).commons_url
 
 
 def download_image(scene, out_path):
-    if os.path.exists(out_path) and os.path.getsize(out_path) > 5000:
-        return out_path
-    if "file" in scene:
-        u = commons_url("&titles=" + urllib.parse.quote(scene["file"]))
-        if u is None:
-            raise RuntimeError(f"no existe el archivo: {scene['file']}")
-    else:
-        u = commons_url(
-            "&generator=search"
-            "&gsrsearch=" + urllib.parse.quote("filetype:bitmap " + scene["q"]) +
-            "&gsrlimit=8&gsrnamespace=6")
-        if u is None:
-            raise RuntimeError(f"sin imagen para {scene['q']}")
-    run(["curl", "-s", "-o", out_path, "-L", "--max-time", "60", u])
-    if os.path.getsize(out_path) < 5000:
-        raise RuntimeError(f"imagen muy chica: {scene}")
-    return out_path
+    return __import__("pipeline.scene_generation", fromlist=["download_image"]).download_image(scene, out_path)
 
 
 def tts_engine_tag(voice):
@@ -334,265 +317,92 @@ def tts_engine_tag(voice):
         return ""
 
 
-async def tts_audio(text, voice, out_wav, deepen=DEEPEN, rate="+0%",
-                    engine=None):
-    """Genera audio. Si engine es 'voicebox' (o None con voicebox activo),
-    intenta Voicebox primero y cae a edge-tts si no está disponible o falla.
-    """
-    if engine != "edge":
-        try:
-            import voicebox_tts
-            res = voicebox_tts.synthesize(text, voice, out_wav, deepen=deepen)
-            if res:
-                return out_wav
-        except Exception as e:
-            print(f"  [voicebox] falló, uso edge-tts: {e}", flush=True)
-    raw = out_wav + ".raw.mp3"
-    comm = edge_tts.Communicate(text, voice, rate=rate)
-    await comm.save(raw)
-    sr = int(subprocess.run(
-        ["ffprobe", "-v", "quiet", "-show_entries", "stream=sample_rate",
-         "-of", "csv=p=0", raw],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip().splitlines()[0])
-    new_sr = int(sr * deepen)
-    af = (f"asetrate={new_sr},aresample={sr},"
-          f"atempo={1/deepen:.3f},"
-          f"adelay=150|150,"
-          f"loudnorm=I=-16:TP=-1.5:LRA=11")
-    run(["ffmpeg", "-y", "-i", raw, "-af", af, "-ar", str(sr), out_wav])
-    os.remove(raw)
-    return out_wav
+PAUSE_RE = re.compile(r"\[(\d+)\]\s*")
+
+
+# TTS / pacing / timings moved to pipeline.tts. Compatibility wrappers remain
+# here to preserve the existing call sites and behavior exactly.
+
+
+def has_pauses(text):
+    """True si el texto contiene marcas de pausa [ms] (p. ej. [800])."""
+    return has_pauses.__wrapped__(text) if hasattr(has_pauses, "__wrapped__") else __import__("pipeline.tts", fromlist=["has_pauses"]).has_pauses(text)
+
+
+def split_pauses(text):
+    """Divide un texto con marcas [ms] en frases con pausa después de cada una."""
+    return __import__("pipeline.tts", fromlist=["split_pauses"]).split_pauses(text)
+
+
+async def _tts_audio_paused(text, voice, out_wav, deepen=DEEPEN, rate="+0%"):
+    """Wrapper de compatibilidad para la lógica modularizada."""
+    return await __import__("pipeline.tts", fromlist=["_tts_audio_paused"])._tts_audio_paused(text, voice, out_wav, deepen=deepen, rate=rate)
+
+
+async def tts_audio(text, voice, out_wav, deepen=DEEPEN, rate="+0%", engine=None):
+    """Genera audio usando la implementación modularizada con compatibilidad completa."""
+    return await __import__("pipeline.tts", fromlist=["tts_audio"]).tts_audio(text, voice, out_wav, deepen=deepen, rate=rate, engine=engine)
 
 
 def align_words(text, wav):
-    global _model
-    if _model is None:
-        from faster_whisper import WhisperModel
-        _model = WhisperModel("base", device="cpu", compute_type="int8")
-    segments, _ = _model.transcribe(wav, language="es", word_timestamps=True,
-                                    vad_filter=True)
-    ws = []
-    for seg in segments:
-        for w in seg.words:
-            ws.append((w.start, w.end, w.word))
-    if not ws:
-        return None
+    return __import__("pipeline.tts", fromlist=["align_words"]).align_words(text, wav)
 
-    toks = text.split()
-    mine = [norm(t) for t in toks]
-    out = []
-    wi = 0
-    for start, end, wtext in ws:
-        if wi >= len(toks):
-            break
-        tn = norm(wtext)
-        if mine[wi] == tn:
-            out.append((toks[wi], start, end))
-            wi += 1
-            continue
-        found = None
-        for j in range(wi, min(wi + 3, len(toks))):
-            if mine[j] == tn:
-                found = j
-                break
-        if found is not None:
-            for k in range(wi, found):
-                out.append((toks[k], start, end))
-            out.append((toks[found], start, end))
-            wi = found + 1
-        else:
-            out.append((toks[wi], start, end))
-            wi += 1
-    if len(out) < len(toks):
-        last_t = out[-1][2] if out else 0.0
-        for k in range(len(out), len(toks)):
-            out.append((toks[k], last_t, last_t + 0.2))
-    return out
+
+def rate_suffix(rate):
+    return __import__("pipeline.tts", fromlist=["rate_suffix"]).rate_suffix(rate)
+
+
+def deepen_suffix(deepen):
+    return __import__("pipeline.tts", fromlist=["deepen_suffix"]).deepen_suffix(deepen)
+
+
+def mix_boom(wav):
+    return __import__("pipeline.tts", fromlist=["mix_boom"]).mix_boom(wav)
+
+
+# Legacy symbol preservation for other codepaths.
+__all__ = [
+    "has_pauses",
+    "split_pauses",
+    "_tts_audio_paused",
+    "tts_audio",
+    "align_words",
+    "rate_suffix",
+    "deepen_suffix",
+    "mix_boom",
+]
 
 
 def make_walking(out_path):
-    img = Image.new("RGB", (W, H))
-    px = img.load()
-    horizon = int(H * 0.62)
-    sky_top = (14, 16, 40)
-    sky_hor = (232, 128, 42)
-    ground_t = (24, 16, 14)
-    ground_b = (6, 5, 8)
-    for y in range(H):
-        if y < horizon:
-            k = y / horizon
-            r = int(sky_top[0] + (sky_hor[0] - sky_top[0]) * k)
-            g = int(sky_top[1] + (sky_hor[1] - sky_top[1]) * k)
-            b = int(sky_top[2] + (sky_hor[2] - sky_top[2]) * k)
-        else:
-            k = (y - horizon) / (H - horizon)
-            r = int(ground_t[0] + (ground_b[0] - ground_t[0]) * k)
-            g = int(ground_t[1] + (ground_b[1] - ground_t[1]) * k)
-            b = int(ground_t[2] + (ground_b[2] - ground_t[2]) * k)
-        for x in range(0, W, 4):
-            for xx in range(x, min(x + 4, W)):
-                px[xx, y] = (r, g, b)
+    """Wrapper de compatibilidad: delega a pipeline.scene_art."""
+    return make_walking.__wrapped__(out_path) if hasattr(make_walking, "__wrapped__") else __import__("pipeline.scene_art", fromlist=["make_walking"]).make_walking(out_path)
 
-    sun_x, sun_y = int(W * 0.72), int(H * 0.30)
-    glow = Image.new("L", (W, H), 0)
-    gd = ImageDraw.Draw(glow)
-    maxr = int(W * 0.34)
-    for r in range(maxr, 0, -10):
-        a = int(110 * (1 - r / maxr))
-        gd.ellipse([sun_x - r, sun_y - r, sun_x + r, sun_y + r], fill=a)
-    glow = glow.filter(ImageFilter.GaussianBlur(50))
-    warm = Image.new("RGB", (W, H), (255, 196, 96))
-    img = Image.composite(warm, img, glow)
-    d = ImageDraw.Draw(img)
-    d.ellipse([sun_x - 46, sun_y - 46, sun_x + 46, sun_y + 46],
-              fill=(255, 240, 190))
 
-    fig = (6, 7, 12)
-    base = int(H * 0.925)
-    cx = int(W * 0.60)
-    hh = int(H * 0.185)
-    hr = int(H * 0.024)
-    hy = base - hh
-    d.ellipse([cx - hr, hy - hr, cx + hr, hy + hr], fill=fig)
-    sh_y = hy + hr - 2
-    hip_y = base - int(H * 0.100)
-    torso_w = int(H * 0.052)
-    d.line([cx, sh_y, cx, hip_y], fill=fig, width=torso_w)
-    d.ellipse([cx - torso_w // 2, sh_y - torso_w // 2,
-               cx + torso_w // 2, sh_y + torso_w // 2], fill=fig)
-    d.ellipse([cx - torso_w // 2, hip_y - torso_w // 2,
-               cx + torso_w // 2, hip_y + torso_w // 2], fill=fig)
-    wl = int(H * 0.016)
-    d.line([cx, hip_y, cx + int(W * 0.05), base - int(H * 0.045),
-            cx + int(W * 0.045), base], fill=fig, width=wl)
-    d.line([cx, hip_y, cx - int(W * 0.038), base - int(H * 0.05),
-            cx - int(W * 0.028), base], fill=fig, width=wl)
-    d.ellipse([cx + int(W * 0.033) - wl // 2, base - wl // 2,
-               cx + int(W * 0.033) + wl // 2, base + wl // 2], fill=fig)
-    d.ellipse([cx - int(W * 0.028) - wl // 2, base - wl // 2,
-               cx - int(W * 0.028) + wl // 2, base + wl // 2], fill=fig)
-    d.line([cx + int(W * 0.012), sh_y + int(H * 0.02),
-            cx + int(W * 0.075), hip_y - int(H * 0.015)], fill=fig, width=wl)
-    d.line([cx - int(W * 0.012), sh_y + int(H * 0.02),
-            cx - int(W * 0.062), hip_y - int(H * 0.022)], fill=fig, width=wl)
-
-    img = img.filter(ImageFilter.GaussianBlur(0.8))
-    img.save(out_path)
-    return out_path
+make_walking.__wrapped__ = __import__("pipeline.scene_art", fromlist=["make_walking"]).make_walking
 
 
 def build_bg(img_path, out_path, drawing=False):
-    img = Image.open(img_path).convert("RGB")
-    iw, ih = img.size
-    target = W / H
-    if iw / ih > target:
-        nw = int(ih * target)
-        x = (iw - nw) // 2
-        img = img.crop((x, 0, x + nw, ih))
-    else:
-        nh = int(iw / target)
-        y = (ih - nh) // 2
-        img = img.crop((0, y, iw, y + nh))
-    img = img.resize((W, H), Image.LANCZOS)
-    img = ImageEnhance.Brightness(img).enhance(0.62 if not drawing else 1.0)
+    """Wrapper de compatibilidad: delega a pipeline.scene_art."""
+    return build_bg.__wrapped__(img_path, out_path, drawing=drawing) if hasattr(build_bg, "__wrapped__") else __import__("pipeline.scene_art", fromlist=["build_bg"]).build_bg(img_path, out_path, drawing=drawing)
 
-    if drawing:
-        img = img.convert("RGB")
-    else:
-        overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        od = ImageDraw.Draw(overlay)
-        for y in range(H):
-            rel = y / H
-            base = int(40 + 150 * rel)
-            if 0.47 <= rel <= 0.90:
-                base = min(255, base + 80)
-            elif 0.43 <= rel < 0.47:
-                base += int(80 * (rel - 0.43) / 0.04)
-            elif 0.90 < rel <= 0.95:
-                base += int(80 * (1 - (rel - 0.90) / 0.05))
-            od.line([(0, y), (W, y)], fill=(0, 0, 0, base))
-        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
 
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    for y in range(H):
-        rel = y / H
-        base = 0
-        if 0.52 <= rel <= 0.88:
-            base = 118
-        elif 0.48 <= rel < 0.52:
-            base = int(118 * (rel - 0.48) / 0.04)
-        elif 0.88 < rel <= 0.94:
-            base = int(118 * (1 - (rel - 0.88) / 0.06))
-        od.line([(0, y), (W, y)], fill=(0, 0, 0, base))
-    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-    img.save(out_path)
-    return out_path
+build_bg.__wrapped__ = __import__("pipeline.scene_art", fromlist=["build_bg"]).build_bg
 
 
 def build_bg_bright(img_path, out_path):
-    """Fondo para direccion visual LUMINOSA (bienestar 2026-08): mismo recorte
-    9:16 pero SIN el crush de brillo x0.62 ni doble banda negra del modo clasico.
-    Un unico gradiente suave cubre la zona de karaoke para que el texto blanco
-    siga leyendose sin apagar la imagen (emocional != oscuro)."""
-    img = Image.open(img_path).convert("RGB")
-    iw, ih = img.size
-    target = W / H
-    if iw / ih > target:
-        nw = int(ih * target)
-        x = (iw - nw) // 2
-        img = img.crop((x, 0, x + nw, ih))
-    else:
-        nh = int(iw / target)
-        y = (ih - nh) // 2
-        img = img.crop((0, y, iw, y + nh))
-    img = img.resize((W, H), Image.LANCZOS)
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    for y in range(H):
-        rel = y / H
-        if rel < 0.42:
-            a = 25
-        elif rel < 0.52:
-            a = int(25 + (100 - 25) * (rel - 0.42) / 0.10)
-        elif rel <= 0.88:
-            a = 115
-        elif rel <= 0.96:
-            a = int(115 + (145 - 115) * (rel - 0.88) / 0.08)
-        else:
-            a = 145
-        od.line([(0, y), (W, y)], fill=(0, 0, 0, a))
-    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-    img.save(out_path, quality=92)
-    return out_path
+    """Wrapper de compatibilidad: delega a pipeline.scene_art."""
+    return build_bg_bright.__wrapped__(img_path, out_path) if hasattr(build_bg_bright, "__wrapped__") else __import__("pipeline.scene_art", fromlist=["build_bg_bright"]).build_bg_bright(img_path, out_path)
+
+
+build_bg_bright.__wrapped__ = __import__("pipeline.scene_art", fromlist=["build_bg_bright"]).build_bg_bright
 
 
 def build_bg_serif(img_path, out_path):
-    """Fondo para modo serif (estilo quote-card): recorte 9:16 + gradiente
-    vertical suave. Sin crush de brillo ni banda de karaoke: la legibilidad
-    la da el gradiente (replica el brillo 97->47 de la referencia)."""
-    img = Image.open(img_path).convert("RGB")
-    iw, ih = img.size
-    target = W / H
-    if iw / ih > target:
-        nw = int(ih * target)
-        x = (iw - nw) // 2
-        img = img.crop((x, 0, x + nw, ih))
-    else:
-        nh = int(iw / target)
-        y = (ih - nh) // 2
-        img = img.crop((0, y, iw, y + nh))
-    img = img.resize((W, H), Image.LANCZOS)
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    for y in range(H):
-        rel = y / H
-        base = int(90 + 80 * rel)
-        od.line([(0, y), (W, y)], fill=(0, 0, 0, base))
-    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-    img.save(out_path, quality=92)
-    return out_path
+    """Wrapper de compatibilidad: delega a pipeline.scene_art."""
+    return build_bg_serif.__wrapped__(img_path, out_path) if hasattr(build_bg_serif, "__wrapped__") else __import__("pipeline.scene_art", fromlist=["build_bg_serif"]).build_bg_serif(img_path, out_path)
+
+
+build_bg_serif.__wrapped__ = __import__("pipeline.scene_art", fromlist=["build_bg_serif"]).build_bg_serif
 
 
 def wrap_lines(draw, words, font, max_w, line_breaks=None, clean_styles=None):
@@ -1006,451 +816,12 @@ def _ease(progress):
     return 0.5 - 0.5 * math.cos(math.pi * progress)
 
 
-def render_scene(timings, bg_img, wav, out_path, final=False, motion=None,
-                 text_scheme="dark", fade=0.4, crf=20, preset="medium", tune=None,
-                 static_lines=None, static_size=None, static_sizes=None,
-                 trans=None,
-                 clean_styles=None, line_breaks=None, serif_data=None,
-                 emphasis_map=None, align="center", equalizer=False):
-    dur = probe_duration(wav)
-    total = PAD_BEFORE + dur + PAD_AFTER
-    frames = int(math.ceil(total * FPS))
-    scheme = TEXT_SCHEMES.get(text_scheme, TEXT_SCHEMES["dark"])
-    white = Image.new("RGB", (W, H), (255, 255, 255))
-    black = Image.new("RGB", (W, H), (0, 0, 0))
-    trans = trans or {}
-    tstyle = trans.get("style", "fade")
-    tdur = trans.get("dur", fade)
-
-    def apply_transition(frame, t):
-        """Transición al inicio y final de la escena (dentro de pads)."""
-        if tdur <= 0:
-            return frame
-        if t < tdur:
-            p = t / tdur
-        elif total - t < tdur:
-            p = (total - t) / tdur
-        else:
-            return frame
-        p = max(0.0, min(1.0, p))
-        if tstyle == "black":
-            return Image.blend(frame, black, (1 - p) * 0.85)
-        if tstyle == "flash":
-            return Image.blend(frame, white, (1 - p) ** 2)
-        if tstyle == "blur":
-            r = int((1 - p) * 10)
-            if r > 0:
-                return frame.filter(ImageFilter.GaussianBlur(radius=r))
-            return frame
-        return Image.blend(frame, white, (1 - p) * 0.85)
-
-    if motion:
-        src = Image.open(bg_img).convert("RGB")
-        sw, sh = int(W * 1.15), int(H * 1.15)
-        src = src.resize((sw, sh), Image.LANCZOS)
-    else:
-        src = None
-
-    def get_frame(fi):
-        if not motion:
-            return Image.open(bg_img).convert("RGB").copy()
-        t = fi / FPS
-        progress = _ease(t / total if total > 0 else 0)
-        sw_, sh_ = src.size
-        if motion == "zoom-in":
-            s = 1.15 - 0.15 * progress
-            cw, ch = int(W * s), int(H * s)
-            x1 = (sw_ - cw) // 2
-            y1 = (sh_ - ch) // 2
-            crop = src.crop((x1, y1, x1 + cw, y1 + ch))
-            return crop.resize((W, H), Image.LANCZOS)
-        elif motion == "zoom-out":
-            s = 1.0 + 0.15 * progress
-            cw, ch = int(W * s), int(H * s)
-            x1 = (sw_ - cw) // 2
-            y1 = (sh_ - ch) // 2
-            crop = src.crop((x1, y1, x1 + cw, y1 + ch))
-            return crop.resize((W, H), Image.LANCZOS)
-        elif motion == "pan-right":
-            mx = int(sw_ * 0.06)
-            xo = int(mx * (1 - 2 * progress))
-            x1 = (sw_ - W) // 2 + xo
-            y1 = (sh_ - H) // 2
-            x1 = max(0, min(x1, sw_ - W))
-            y1 = max(0, min(y1, sh_ - H))
-            return src.crop((x1, y1, x1 + W, y1 + H)).copy()
-        elif motion == "pan-left":
-            mx = int(sw_ * 0.06)
-            xo = int(mx * (-1 + 2 * progress))
-            x1 = (sw_ - W) // 2 + xo
-            y1 = (sh_ - H) // 2
-            x1 = max(0, min(x1, sw_ - W))
-            y1 = max(0, min(y1, sh_ - H))
-            return src.crop((x1, y1, x1 + W, y1 + H)).copy()
-        elif motion == "pan-up":
-            my = int(sh_ * 0.04)
-            yo = int(my * (-1 + 2 * progress))
-            x1 = (sw_ - W) // 2
-            y1 = (sh_ - H) // 2 + yo
-            x1 = max(0, min(x1, sw_ - W))
-            y1 = max(0, min(y1, sh_ - H))
-            return src.crop((x1, y1, x1 + W, y1 + H)).copy()
-        elif motion == "pan-down":
-            my = int(sh_ * 0.04)
-            yo = int(my * (1 - 2 * progress))
-            x1 = (sw_ - W) // 2
-            y1 = (sh_ - H) // 2 + yo
-            x1 = max(0, min(x1, sw_ - W))
-            y1 = max(0, min(y1, sh_ - H))
-            return src.crop((x1, y1, x1 + W, y1 + H)).copy()
-        else:
-            return src.crop(((sw_ - W) // 2, (sh_ - H) // 2,
-                             (sw_ - W) // 2 + W, (sh_ - H) // 2 + H)).copy()
-
-    if serif_data:
-        struct, cta_struct = serif_data
-        srows, cfont, cta_rows, heart_y, heart_font = \
-            _layout_serif_static(struct, cta_struct, timings=timings)
-    elif static_lines:
-        font, positions = _layout_static(static_lines, final,
-                                         static_size or 88,
-                                         line_sizes=static_sizes)
-    else:
-        font, positions = _layout_karaoke(timings, final,
-                                          clean_styles=clean_styles,
-                                          line_breaks=line_breaks,
-                                          emphasis_map=emphasis_map,
-                                          align=align)
-
-    venc = ["-c:v", "libx264", "-preset", preset]
-    if tune:
-        venc += ["-tune", tune]
-    venc += ["-crf", str(crf), "-pix_fmt", "yuv420p", "-r", str(FPS)]
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "rgb24",
-        "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
-        "-i", wav,
-        "-t", f"{total:.3f}",
-    ] + venc + [
-        "-af", f"adelay={int(PAD_BEFORE*1000)}:all=1,apad",
-        "-c:a", "aac", "-b:a", "192k", "-ar", "24000", "-ac", "1",
-        "-movflags", "+faststart", out_path,
-    ]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    for fi in range(frames):
-        t = fi / FPS
-        frame = get_frame(fi)
-        if serif_data:
-            _draw_serif(frame, srows, cfont, cta_rows,
-                        heart_y, heart_font, scheme, t=t)
-        else:
-            if not static_lines:
-                _draw_text_bg(frame, positions, scheme)
-            _draw_karaoke(frame, font, positions, t, scheme)
-        if equalizer:
-            _draw_equalizer(frame, t, scheme)
-        frame = apply_transition(frame, t)
-        proc.stdin.write(frame.tobytes())
-    proc.stdin.close()
-    proc.wait()
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg fallo: {out_path}")
-    return out_path
-
-
-def render_scene_video(timings, video_path, wav, out_path, final=False,
-                       text_scheme="dark", darken=0.22, fade=0.4,
-                       crf=20, preset="medium", tune=None,
-                       static_lines=None, static_size=None, static_sizes=None,
-                       static_y=0.42,
-                       trans=None,
-                       clean_styles=None, line_breaks=None,
-                       emphasis_map=None, align="center"):
-    """Escena con fondo de video (b-roll vertical). Loop infinito via ffmpeg."""
-    dur = probe_duration(wav)
-    total = PAD_BEFORE + dur + PAD_AFTER
-    frames = int(math.ceil(total * FPS))
-    scheme = TEXT_SCHEMES.get(text_scheme, TEXT_SCHEMES["dark"])
-
-    vf = ("scale={0}:{1}:force_original_aspect_ratio=increase,"
-          "crop={0}:{1},".format(W, H) +
-          f"eq=brightness=-{darken:.2f}:saturation=0.85,fps={FPS}")
-    dec = subprocess.Popen(
-        ["ffmpeg", "-y", "-stream_loop", "-1", "-i", video_path,
-         "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-
-    if static_lines:
-        font, static_positions = _layout_static(static_lines, final,
-                                         static_size or 88,
-                                         line_sizes=static_sizes,
-                                         y_center=static_y)
-        _, karaoke_positions = _layout_karaoke(timings, final,
-                                               clean_styles=clean_styles,
-                                               line_breaks=line_breaks,
-                                               emphasis_map=emphasis_map,
-                                               align=align)
-    else:
-        font, karaoke_positions = _layout_karaoke(timings, final,
-                                          clean_styles=clean_styles,
-                                          line_breaks=line_breaks,
-                                          emphasis_map=emphasis_map,
-                                          align=align)
-        static_positions = None
-    venc = ["-c:v", "libx264", "-preset", preset]
-    if tune:
-        venc += ["-tune", tune]
-    venc += ["-crf", str(crf), "-pix_fmt", "yuv420p", "-r", str(FPS)]
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "rgb24",
-        "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
-        "-i", wav,
-        "-t", f"{total:.3f}",
-    ] + venc + [
-        "-af", f"adelay={int(PAD_BEFORE*1000)}:all=1,apad",
-        "-c:a", "aac", "-b:a", "192k", "-ar", "24000", "-ac", "1",
-        "-movflags", "+faststart", out_path,
-    ]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    frame_size = W * H * 3
-    white = Image.new("RGB", (W, H), (255, 255, 255))
-    for fi in range(frames):
-        t = fi / FPS
-        raw = dec.stdout.read(frame_size)
-        if len(raw) != frame_size:
-            dec.stdout.close()
-            dec.terminate()
-            raise RuntimeError(f"video de fondo corto/fallo: {video_path}")
-        frame = Image.frombytes("RGB", (W, H), raw)
-        if fi == 0:
-            _draw_text_bg(frame, karaoke_positions, scheme)
-            if static_positions:
-                _draw_text_bg(frame, static_positions, scheme)
-        _draw_karaoke(frame, font, karaoke_positions, t, scheme)
-        if static_positions:
-            _draw_karaoke(frame, font, static_positions, t, scheme)
-        if fade > 0:
-            if t < fade:
-                frame = Image.blend(frame, white, min(0.75, 1 - t / fade))
-            elif total - t < fade:
-                frame = Image.blend(frame, white,
-                                    min(0.75, (fade - (total - t)) / fade))
-        proc.stdin.write(frame.tobytes())
-    dec.stdout.close()
-    dec.terminate()
-    dec.wait()
-    proc.stdin.close()
-    proc.wait()
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg fallo: {out_path}")
-    return out_path
-
-
-def render_scene_draw(timings, img_path, wav, out_path, final=False,
-                      style="whiteboard", crf=20, preset="medium", tune=None,
-                      clean_styles=None, line_breaks=None, align="center"):
-    """Escena con efecto 'mano dibujando': line-art revelado + stylus + karaoke."""
-    import estilos_golpo as golpo
-
-    dur = probe_duration(wav)
-    total = PAD_BEFORE + dur + PAD_AFTER
-    frames = int(math.ceil(total * FPS))
-    art = Image.open(img_path).convert("RGB")
-    bg_np, st_np, order = golpo.build_draw(art, style=style)
-    font, positions = _layout_karaoke(timings, final,
-                                      clean_styles=clean_styles,
-                                      line_breaks=line_breaks,
-                                      align=align)
-    scheme = TEXT_SCHEMES["light"] if golpo.is_light(style) else TEXT_SCHEMES["dark"]
-
-    venc = ["-c:v", "libx264", "-preset", preset]
-    if tune:
-        venc += ["-tune", tune]
-    venc += ["-crf", str(crf), "-pix_fmt", "yuv420p", "-r", str(FPS)]
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "rgb24",
-        "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
-        "-i", wav,
-        "-t", f"{total:.3f}",
-    ] + venc + [
-        "-af", f"adelay={int(PAD_BEFORE*1000)}:all=1,apad",
-        "-c:a", "aac", "-b:a", "192k", "-ar", "24000", "-ac", "1",
-        "-movflags", "+faststart", out_path,
-    ]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    for fi in range(frames):
-        t = fi / FPS
-        progress = min(max(t / dur, 0.0), 1.0) if dur > 0 else 1.0
-        mask = golpo.reveal_mask(order, progress)
-        frame = golpo.draw_frame(bg_np, st_np, mask)
-        tip = golpo.stylus_position(order, progress)
-        if tip is not None:
-            frame = golpo.compose_stylus(frame, *tip)
-        if fi == 0:
-            _draw_text_bg(frame, positions, scheme)
-        _draw_karaoke(frame, font, positions, t, scheme)
-        proc.stdin.write(frame.tobytes())
-    proc.stdin.close()
-    proc.wait()
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg fallo: {out_path}")
-    return out_path
-
-
-def styled_bg(img_path, out_path, style):
-    """Aplica un estilo ilustrado (estilos_golpo) y guarda el fondo 9:16."""
-    import estilos_golpo as golpo
-
-    img = Image.open(img_path).convert("RGB")
-    golpo.apply_style(img, style).save(out_path, quality=92)
-    return out_path
-
-
-def render_pipeline(scene, timings, img_path, bg_img, wav, mp4,
-                    final=False, motion=None, master=False,
-                    clean_styles=None, line_breaks=None,
-                    emphasis_map=None):
-    """Elige pipeline según claves: handdraw | estilo | clásico."""
-    crf, preset, tune = MASTER if master else (20, "medium", None)
-    static_lines = scene.get("static_text") or None
-    static_size = scene.get("static_size")
-    static_sizes = scene.get("static_sizes")
-    trans = scene.get("trans")
-    estilo = scene.get("estilo")
-
-    if scene.get("handdraw"):
-        return render_scene_draw(timings, img_path, wav, mp4, final=final,
-                                 style=estilo or "whiteboard",
-                                 crf=crf, preset=preset, tune=tune,
-                                 clean_styles=clean_styles,
-                                 line_breaks=line_breaks,
-                                 align=scene.get("text_align", "center"))
-    if scene.get("text_mode") == "serif":
-        _, struct = parse_serif_text(scene["text"])
-        _, cta_struct = parse_serif_text(scene.get("cta") or "")
-        return render_scene(timings, bg_img, wav, mp4, final=final,
-                            motion=motion,
-                            text_scheme=scene.get("text_scheme", "dark"),
-                            crf=crf, preset=preset, tune=tune,
-                            trans=trans,
-                            serif_data=(struct, cta_struct))
-    if scene.get("title_text"):
-        from vfxkit_titles import generate_title
-        title_mp4 = mp4.replace(".mp4", "_title.mp4")
-        generate_title(scene["title_text"], title_mp4,
-                       style=scene.get("title_style", "aurora"),
-                       size=scene.get("title_size", 120),
-                       width=W, height=H,
-                       duration=scene.get("title_duration", 5.0),
-                       subtitle=scene.get("title_subtitle"))
-        return title_mp4
-
-    if scene.get("waveform"):
-        from waveform_renderer import render_waveform_video
-        wave_mp4 = mp4.replace(".mp4", "_wave.mp4")
-        render_waveform_video(wav, wave_mp4,
-                              width=W, height=scene.get("waveform_height", 150),
-                              mode=scene.get("waveform_mode", "cline"),
-                              color=scene.get("waveform_color", "white"))
-        return wave_mp4
-
-    if estilo:
-        styled_bg(img_path, bg_img, estilo)
-        import estilos_golpo as golpo
-        scheme = "light" if golpo.is_light(estilo) else "dark"
-        return render_scene(timings, bg_img, wav, mp4, final=final,
-                            motion=motion, text_scheme=scheme,
-                            crf=crf, preset=preset, tune=tune,
-                            static_lines=static_lines, static_size=static_size,
-                            static_sizes=static_sizes,
-                            trans=trans, clean_styles=clean_styles,
-                            line_breaks=line_breaks,
-                            emphasis_map=emphasis_map,
-                            align=scene.get("text_align", "center"),
-                            equalizer=scene.get("equalizer", False))
-    return render_scene(timings, bg_img, wav, mp4, final=final, motion=motion,
-                        crf=crf, preset=preset, tune=tune,
-                        static_lines=static_lines, static_size=static_size,
-                        static_sizes=static_sizes,
-                        trans=trans, clean_styles=clean_styles,
-                        line_breaks=line_breaks,
-                        emphasis_map=emphasis_map,
-                        align=scene.get("text_align", "center"),
-                        equalizer=scene.get("equalizer", False))
-
-
 def resolve_visual(scene):
-    """Convierte una escena semántica en parámetros técnicos.
+    """Wrapper de compatibilidad: delega a pipeline.visual."""
+    return resolve_visual.__wrapped__(scene) if hasattr(resolve_visual, "__wrapped__") else __import__("pipeline.visual", fromlist=["resolve_visual"]).resolve_visual(scene)
 
-    Si la escena tiene clave "visual" (dict con type/subject/action/mood),
-    genera el prompt de imagen y sugiere motion/style automáticamente.
-    Si no tiene "visual", retorna la escena sin cambios.
 
-    Ejemplo de uso:
-        scene = {
-            "text": "No necesitas sanar, necesitas integrar.",
-            "visual": {
-                "type": "object_closeup",
-                "subject": "woman hands",
-                "action": "holding old photograph",
-                "mood": "reflective"
-            },
-            "emphasis": ["integrar"]
-        }
-        scene = resolve_visual(scene)
-        # scene["ai"] = "woman hands holding old photograph, reflective mood, soft natural light, cinematic, photorealistic"
-        # scene["motion"] = "zoom-in"
-    """
-    visual = scene.get("visual")
-    if not visual or not isinstance(visual, dict):
-        return scene
-
-    # Construir prompt desde componentes semánticos
-    parts = []
-    if visual.get("subject"):
-        parts.append(visual["subject"])
-    if visual.get("action"):
-        parts.append(visual["action"])
-    if visual.get("mood"):
-        parts.append(f"{visual['mood']} mood")
-    parts.append("soft natural light, cinematic, photorealistic, high detail")
-    scene["ai"] = ", ".join(parts)
-
-    # Sugerir motion según el tipo de escena
-    if not scene.get("motion"):
-        vtype = visual.get("type", "")
-        motion_map = {
-            "object_closeup": "zoom-in",
-            "human_reflection": "zoom-in",
-            "wide_landscape": "zoom-out",
-            "hands_detail": "zoom-in",
-            "environment": "pan-right",
-            "symbolic": "zoom-out",
-        }
-        scene["motion"] = motion_map.get(vtype, "zoom-in")
-
-    # Convertir emphasis list a tags <strong> en el texto
-    emphasis_words = scene.get("emphasis")
-    if emphasis_words and isinstance(emphasis_words, list):
-        text = scene["text"]
-        for word in emphasis_words:
-            # Case-insensitive replacement manteniendo caso original
-            pattern = re.compile(re.escape(word), re.IGNORECASE)
-            text = pattern.sub(f"<strong>{word}</strong>", text)
-        scene["text"] = text
-        # Limpiar emphasis ya que ahora están en el texto
-        del scene["emphasis"]
-
-    return scene
+resolve_visual.__wrapped__ = __import__("pipeline.visual", fromlist=["resolve_visual"]).resolve_visual
 
 
 def build_scene(scene, idx, vk):
@@ -1470,6 +841,9 @@ def build_scene(scene, idx, vk):
     else:
         tts_text = raw_text
         emphasis_map = {}
+    tts_clean = tts_text
+    if has_pauses(tts_text):
+        _, _chunks, tts_clean = split_pauses(tts_text)
 
     wav = os.path.join(AUDDIR, f"{slug}{etag}_{zlib.crc32(tts_text.encode())}.wav")
     mp4 = os.path.join(OUTDIR, f"{slug}.mp4")
@@ -1490,9 +864,9 @@ def build_scene(scene, idx, vk):
     if os.path.exists(tj):
         timings = [tuple(x) for x in json.load(open(tj))]
     else:
-        timings = align_words(tts_text, wav)
+        timings = align_words(tts_clean, wav)
         if timings is None:
-            toks = tts_text.split()
+            toks = tts_clean.split()
             dur = probe_duration(wav)
             step = dur / len(toks)
             timings = [(w, i * step, (i + 1) * step) for i, w in enumerate(toks)]
@@ -1500,6 +874,62 @@ def build_scene(scene, idx, vk):
     render_scene(timings, bg_img, wav, mp4, final=(idx == len(SCENES)),
                  emphasis_map=emphasis_map)
     return mp4
+
+
+def render_scene(timings, bg_img, wav, out_path, final=False, motion=None,
+                 text_scheme="dark", fade=0.4, crf=20, preset="medium", tune=None,
+                 static_lines=None, static_size=None, static_sizes=None,
+                 trans=None, clean_styles=None, line_breaks=None, serif_data=None,
+                 emphasis_map=None, align="center", equalizer=False):
+    """Wrapper de compatibilidad: delega a pipeline.rendering."""
+    return __import__("pipeline.rendering", fromlist=["render_scene"]).render_scene(
+        timings, bg_img, wav, out_path, final=final, motion=motion,
+        text_scheme=text_scheme, fade=fade, crf=crf, preset=preset, tune=tune,
+        static_lines=static_lines, static_size=static_size, static_sizes=static_sizes,
+        trans=trans, clean_styles=clean_styles, line_breaks=line_breaks,
+        serif_data=serif_data, emphasis_map=emphasis_map, align=align,
+        equalizer=equalizer,
+    )
+
+
+def render_scene_video(timings, video_path, wav, out_path, final=False,
+                       text_scheme="dark", darken=0.22, fade=0.4,
+                       crf=20, preset="medium", tune=None,
+                       static_lines=None, static_size=None, static_sizes=None,
+                       static_y=0.42, trans=None,
+                       clean_styles=None, line_breaks=None,
+                       emphasis_map=None, align="center"):
+    """Wrapper de compatibilidad: delega a pipeline.rendering."""
+    return __import__("pipeline.rendering", fromlist=["render_scene_video"]).render_scene_video(
+        timings, video_path, wav, out_path, final=final, text_scheme=text_scheme,
+        darken=darken, fade=fade, crf=crf, preset=preset, tune=tune,
+        static_lines=static_lines, static_size=static_size, static_sizes=static_sizes,
+        static_y=static_y, trans=trans, clean_styles=clean_styles,
+        line_breaks=line_breaks, emphasis_map=emphasis_map, align=align,
+    )
+
+
+def render_scene_draw(timings, img_path, wav, out_path, final=False,
+                      style="whiteboard", crf=20, preset="medium", tune=None,
+                      clean_styles=None, line_breaks=None, align="center"):
+    """Wrapper de compatibilidad: delega a pipeline.rendering."""
+    return __import__("pipeline.rendering", fromlist=["render_scene_draw"]).render_scene_draw(
+        timings, img_path, wav, out_path, final=final, style=style,
+        crf=crf, preset=preset, tune=tune, clean_styles=clean_styles,
+        line_breaks=line_breaks, align=align,
+    )
+
+
+def render_pipeline(scene, timings, img_path, bg_img, wav, mp4,
+                    final=False, motion=None, master=False,
+                    clean_styles=None, line_breaks=None,
+                    emphasis_map=None):
+    """Wrapper de compatibilidad: delega a pipeline.rendering."""
+    return __import__("pipeline.rendering", fromlist=["render_pipeline"]).render_pipeline(
+        scene, timings, img_path, bg_img, wav, mp4, final=final, motion=motion,
+        master=master, clean_styles=clean_styles, line_breaks=line_breaks,
+        emphasis_map=emphasis_map,
+    )
 
 
 def concat(clips, out_path):
@@ -1513,6 +943,86 @@ def concat(clips, out_path):
          "-c:a", "aac", "-b:a", "192k", "-ar", "24000", "-ac", "1",
          "-map_metadata", "-1",
          "-movflags", "+faststart", out_path])
+
+
+# ── Recursos visuales locales: caché por tema ──────────────────────────────
+# De ahora en más, toda imagen/video descargado para crear videos se guarda
+# en esta carpeta central y se reusa antes de golpear a los proveedores IA
+# (Pollinations/Gemini/Cloudflare/HF), Pexels o Commons.
+RECURSOS_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "RECURSOS_VISUALES_PARA_VIDEOS_Y_SHORTS")
+
+
+def _tema_slug(tema):
+    """Normaliza una clave de tema/keywords a un nombre de archivo seguro."""
+    if not tema:
+        return "sin_tema"
+    s = re.sub(r"[^a-z0-9]+", "_", str(tema).lower().strip())
+    return (s.strip("_") or "sin_tema")[:60]
+
+
+def buscar_recurso(ext, tema):
+    """Busca en RECURSOS_DIR un archivo <tema>.<ext> ya descargado.
+
+    Devuelve la ruta absoluta si existe, None si no (para que el caller
+    descargue y luego llame a guardar_recurso). ext sin punto: 'jpg', 'mp4'.
+
+    Hace match exacto (<tema>.<ext>) y flexible (el slug del tema contenido
+    en el nombre del archivo, o a la inversa) para tolerar nombres manuales
+    como 'hombre_afro_orando.jpg'."""
+    if not os.path.isdir(RECURSOS_DIR):
+        return None
+    slug = _tema_slug(tema)
+    dest = os.path.join(RECURSOS_DIR, f"{slug}.{ext}")
+    if os.path.exists(dest) and os.path.getsize(dest) > 5000:
+        return dest
+    # Match flexible: el slug conten ido en el basename (sin ext) o al revés.
+    try:
+        for f in sorted(os.listdir(RECURSOS_DIR)):
+            if not f.endswith(f".{ext}"):
+                continue
+            base = f[: -len(f".{ext}")]
+            base_slug = _tema_slug(base)
+            if slug and (slug in base_slug or base_slug in slug):
+                p = os.path.join(RECURSOS_DIR, f)
+                if os.path.getsize(p) > 5000:
+                    return p
+    except OSError:
+        pass
+    return None
+
+
+def guardar_recurso(ruta_fuente, tema, ext):
+    """Guarda una copia de ruta_fuente en RECURSOS_DIR como <tema>.<ext>.
+    No sobreescribe si ya existe. Devuelve la ruta guardada o None."""
+    try:
+        os.makedirs(RECURSOS_DIR, exist_ok=True)
+        slug = _tema_slug(tema)
+        dest = os.path.join(RECURSOS_DIR, f"{slug}.{ext}")
+        if os.path.exists(dest):
+            return dest
+        from shutil import copyfile
+        copyfile(ruta_fuente, dest)
+        return dest
+    except Exception:
+        return None
+
+
+def limpiar_metadata_video(mp4):
+    """Quita TODO metadata del MP4 (remux con -map_metadata -1, sin re-encode).
+    Garantiza que YouTube no vea rastro de qué generador se usó. No op: si ya
+    está limpio, conserva el archivo original igualmente (remux es rápido)."""
+    tmp = mp4 + ".nolmeta.mp4"
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-i", mp4, "-map", "0", "-c", "copy",
+         "-map_metadata", "-1", "-movflags", "+faststart", tmp],
+        capture_output=True)
+    if r.returncode == 0 and os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+        os.replace(tmp, mp4)
+    else:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return mp4
 
 
 def main():

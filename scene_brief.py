@@ -57,6 +57,7 @@ class PreferredSource(str, Enum):
     """Fuente preferida para el fondo visual de la escena."""
     AI = "ai"                  # Imagen generada por IA
     STOCK = "stock"            # Video stock de Pexels
+    PHOTO_STOCK = "photo_stock"  # Foto stock de Pexels (V2-FINAL)
     AI_VIDEO = "ai_video"     # Video generado por IA
     LOCAL = "local"            # Archivo local existente
     COMMONS = "commons"        # Wikimedia Commons fallback
@@ -155,6 +156,13 @@ class SceneBrief:
     continuity_group: str = ""
     visual_risks: dict[str, str] = field(default_factory=dict)
     visual_priority: int = 0
+
+    # ── V2.7 INTELIGENCIA VISUAL DE MEDIOS (opcional, no rompe V2.6) ──
+    # Dict serializable con la información estructural derivada para esta escena.
+    # Lo puebla media_intelligence.py (visual keywords + estrategia de fuente).
+    visual_keywords: dict = field(default_factory=dict)   # VisualKeywords.to_dict()
+    media_strategy: dict = field(default_factory=dict)    # MediaSourceStrategy.to_dict()
+    selected_source: str = ""                             # fuente efectiva (descubrimiento+score)
 
     # ── METADATA ──
     language: str = "es"

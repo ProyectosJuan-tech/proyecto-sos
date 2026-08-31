@@ -189,9 +189,10 @@ class EditorialEmission:
     scene_dicts: list[dict]        # listos para hacer_(shorts|videos_youtube)
     acom_layouts: list[TextLayout] = field(default_factory=list)
     asset_selections: list[AssetSelection] = field(default_factory=list)
+    media_direction: Any = None    # MediaDirection (V2-FINAL) o None
 
     def to_report(self) -> dict:
-        return {
+        rep = {
             "format": self.format_name,
             "resolution": f"{self.canvas_width}x{self.canvas_height}",
             "n_scenes": len(self.briefs),
@@ -203,6 +204,9 @@ class EditorialEmission:
             "assets": len(self.asset_selections),
             "status": "ok",
         }
+        if self.media_direction is not None:
+            rep["media_direction"] = self.media_direction.to_report()
+        return rep
 
 
 def _resolve_resolution(format_name: str) -> tuple[int, int]:
@@ -310,7 +314,7 @@ def build_editorial_plan(
             narration=narration,
             emotional_core=narrations.get("__emotional_core", "") if narrations else "",
             visual_event=central_idea,
-            action=_role_action(role),
+            action="",
             setting=_role_setting(role),
             symbol=None,
             subject="",
@@ -330,15 +334,43 @@ def build_editorial_plan(
     # central_idea), y el prompt final via compose_prompt(). Se escribe de vuelta
     # en el SceneBrief para que llegue REALMENTE al renderer (ai_prompt/visual_event).
     if narrative_director:
-        from narrative_visual_director import NarrativeVisualDirector
+        from narrative_visual_director import (
+            NarrativeVisualDirector, _light_for, _camera_for, _composition_for,
+            _GENERIC_DEFAULT_LIGHT, _GENERIC_DEFAULT_CAMERA,
+        )
         try:
             directed = NarrativeVisualDirector().direct_plan(briefs)
+            # Aspect para el Proveedor Adapter (16:9 para youtube/16, 9:16 resto)
+            canvas_ar = "16:9" if is_long else "9:16"
+            _HUMAN_TYPES = {"person", "hands", "interaction", "detail"}
             for brief, d in zip(briefs, directed):
                 if d.representation_type.value:
                     brief.subject_priority = brief.subject_priority or d.strategy.subject_type
                 brief.visual_event = d.visual_event
+                brief.action = brief.action or d.strategy.action
                 brief.symbol = brief.symbol or d.symbol
+                # Reflejar en los campos del brief los valores coherentes que ya
+                # entran en el prompt (luz por rol, cámara por plano, composición
+                # formato-neutra) para que NO queden los defaults idénticos.
+                # Misma lógica de reemplazo de default que _compose.
+                light_ = brief.lighting or ""
+                if not light_ or light_ == _GENERIC_DEFAULT_LIGHT:
+                    brief.lighting = _light_for(brief.narrative_role)
+                cam_ = brief.camera or ""
+                if not cam_ or cam_ == _GENERIC_DEFAULT_CAMERA:
+                    brief.camera = _camera_for(d.strategy.shot_type)
+                brief.composition = brief.composition or _composition_for(d.strategy.shot_type)
                 brief.ai_prompt = d.prompt
+                # V2.4 — PROVEEDOR ADAPTER: adapta el prompt base (brief neutral)
+                # al formato (16:9/9:16 + espacio de texto) y al realismo humano
+                # SOLO cuando la escena gira en torno a una persona. Separa
+                # "qué quiero ver" (compose_prompt) de "cómo se lo comunico al
+                # generador" (build_quality_prompt) sin tocar el pipeline legacy.
+                from visual_quality_engine import build_quality_prompt
+                has_human = d.representation_type.value in _HUMAN_TYPES
+                brief.ai_prompt = build_quality_prompt(
+                    d.prompt, canvas_ar=canvas_ar, has_human=has_human,
+                )
         except Exception:
             # si la dirección fallara por cualquier motivo, no romper el plan:
             # quedan los visual_events base (central_idea) y se sigue adelante.
@@ -484,17 +516,23 @@ def select_assets_for_briefs(
     """Selecciona assets para cada SceneBrief (asset_selector sin duplicar scoring).
 
     use_real_fetch=False → sin red (los tests pasan fetch_fn mock).
+
+    V2.7: construye `continuity_context` a partir de las selecciones previas
+    (representacion/fuente ya usadas) para que la diversidad entre escenas
+    influya en el scoring de asset_selector (era un parámetro muerto).
     """
     selections: list[AssetSelection] = []
     previous: list = []
+    used_sources: list[str] = []
     for brief in briefs:
-        if use_real_fetch:
-            sel = select_asset(brief, previous_assets=previous, fetch_fn=fetch_fn)
-        else:
-            sel = select_asset(brief, previous_assets=previous, fetch_fn=fetch_fn)
+        continuity_context = {"last_sources": list(used_sources)}
+        sel = select_asset(brief, previous_assets=previous,
+                           continuity_context=continuity_context,
+                           fetch_fn=fetch_fn)
         selections.append(sel)
         if sel.selected:
             previous.append(sel.selected)
+            used_sources.append(sel.selected.orientation)
     return selections
 
 
@@ -518,10 +556,22 @@ def produce_editorial(
     preferred_source: PreferredSource = PreferredSource.AI,
     asset_fetch_fn=None,
     use_real_asset_fetch: bool = False,
+    enable_media_director: bool = True,
+    enable_media_intelligence: bool = True,
+    requested_topic: str | None = None,
+    requested_idea: str | None = None,
+    enforce_topic_lock: bool = True,
 ) -> EditorialEmission:
     """Recorre la cadena completa para un tema dado.
 
-    IDEA → plan → briefs → assets → layouts → scene_dicts.
+    IDEA → plan → briefs → MEDIA DIRECTOR → assets → layouts → scene_dicts.
+
+    TOPIC LOCK: si `enforce_topic_lock`, valida que el plan construido responda
+    a la idea SOLICITADA (requested_topic/requested_idea; por defecto `topic`/
+    `central_idea`). Si el contenido del plan no contiene anclas de esa idea,
+    eleva TopicLockError y detiene la producción ANTES de gastar assets/
+    proveedores. El sistema puede mejorar título/guion/imagen, pero NO sustituir
+    el tema central entregado por el usuario.
     """
     w = 1920 if ("youtube" in format_name.lower() or "16" in format_name) else 1080
     h = 1080 if w == 1920 else 1920
@@ -539,6 +589,46 @@ def produce_editorial(
         motion=motion,
         preferred_source=preferred_source,
     )
+
+    if enforce_topic_lock:
+        from topic_lock import assert_topic_locked
+        assert_topic_locked(
+            requested_topic=requested_topic or topic,
+            requested_idea=requested_idea or central_idea,
+            plan=plan,
+        )
+
+    # V2-FINAL — MEDIA DIRECTOR: decide por escena el tipo de medio (AI_IMAGE/
+    # VIDEO_STOCK/PHOTO_STOCK) y el motion, con diversidad como factor suave
+    # (calidad manda, variedad como desempate). Se aplica AL brief para que el
+    # render scene_dict use la fuente y el motion correctos.
+    media_direction = None
+    if enable_media_director:
+        from media_director import direct_media, preferred_source_for
+        media_direction = direct_media(briefs)
+        for brief, sm in zip(briefs, media_direction.scenes):
+            brief.preferred_source = preferred_source_for(sm.medium)
+            brief.motion = sm.motion
+
+    # V2.7 — INTELIGENCIA VISUAL DE MEDIOS (aditivo, sin red): enriquece cada
+    # brief con VisualKeywords y la estrategia de fuente. No cambia el
+    # preferred_source ya decidido por el media_director; expone la info
+    # estructurada para el informe y alimenta las queries de stock desde el
+    # evento (subordinadas a la narrativa, no al revés).
+    if enable_media_intelligence:
+        from media_intelligence import (
+            derive_visual_keywords, build_media_source_strategy,
+        )
+        for brief in briefs:
+            kw = derive_visual_keywords(brief)
+            brief.visual_keywords = kw.to_dict()
+            strat = build_media_source_strategy(brief)
+            brief.media_strategy = strat.to_dict()
+            # Queries de stock derivadas del evento (solo si el brief no trae
+            # las suyas): así select_asset parte del evento, no de traducciones
+            # crudas, y conserva early-stop/máx-cuotas de asset_selector.
+            if kw.stock_keywords and not brief.pexels_queries:
+                brief.pexels_queries = list(kw.stock_keywords)
 
     # Assets
     selections = select_assets_for_briefs(
@@ -565,4 +655,5 @@ def produce_editorial(
         scene_dicts=scene_dicts,
         acom_layouts=layouts,
         asset_selections=selections,
+        media_direction=media_direction,
     )

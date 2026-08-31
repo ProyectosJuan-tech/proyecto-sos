@@ -431,7 +431,7 @@ class NarrativeVisualDirector:
             visual_event=event,
             representation_type=rtype,
             strategy=strat,
-            symbol=brief.symbol or _symbol_for_strategy(rtype),
+            symbol=brief.symbol or _symbol_from_event(event, rtype),
             prompt=_compose(brief, event, strat, rtype),
             fallback_used=not (brief.narration or "").strip(),
         )
@@ -465,7 +465,7 @@ class NarrativeVisualDirector:
                 visual_event=event,
                 representation_type=rtype,
                 strategy=strat,
-                symbol=brief.symbol or _symbol_for_strategy(rtype),
+                symbol=brief.symbol or _symbol_from_event(event, rtype),
                 prompt=_compose(brief, event, strat, rtype),
                 fallback_used=not (brief.narration or "").strip(),
             )
@@ -495,16 +495,113 @@ def _symbol_for_strategy(rtype: RepresentationType) -> str:
     }.get(rtype, "a simple everyday object")
 
 
+# ─────────────────────────────────────────────
+# BRIEF COHERENCE (V2.4): luz por rol, cámara por plano, acción/símbolo
+# coherentes con el evento. El prompt base describe el FRAMING de la escena
+# (formato-neutro); la adaptación por formato (16:9/9:16 + espacio de texto) la
+# hace el Proveedor Adapter (build_quality_prompt) al final del flujo.
+# ─────────────────────────────────────────────
+
+_LIGHT_BY_ROLE: dict[str, str] = {
+    "hook": "soft morning window light through a sheer curtain",
+    "problem": "dim cool bedside light at dawn, low and quiet",
+    "agitation": "overcast diffused daylight, flat and slightly cooler",
+    "psychology": "warm pool of desk-lamp light falling on paper",
+    "solution": "bright clear morning light from a window",
+    "hopeful": "luminous warm daylight spilling through an open door",
+    "hope": "luminous warm daylight spilling through an open door",
+    "biblical_grounding": "gentle window light falling on an open page",
+    "reality": "flat honest daylight, unglamorous and true",
+    "callout": "soft warm inviting evening light",
+    "loop": "calm settled evening light in a now-quiet room",
+    "emphasis": "focused low light with a single clear highlight",
+    "payoff": "soft comfortable light with gentle shadows",
+    "bridge": "light passing between two adjoining rooms",
+}
+
+_CAMERA_BY_SHOT: dict[str, str] = {
+    "close-up": "single sitting, 85mm f/1.8, shallow depth of field",
+    "medium": "50mm f/2, natural depth, at eye level",
+    "wide": "35mm f/2.8, environmental, lots of air around the subject",
+    "long": "35mm f/2.8, environmental establishing frame",
+}
+
+
+# Marcadores de default GEÉRICOS que build_scene() hornea en cada brief.
+# Si el brief trae estos valores exactos significa que nadie los eligió: la capa
+# auto (V2.4) los sustituye por luz por rol + cámara por plano. Cualquier OTRO
+# valor (una luz/cámara deliberada de un SceneBrief manual) se respeta.
+_GENERIC_DEFAULT_LIGHT = "soft natural window light"
+_GENERIC_DEFAULT_CAMERA = "Medium shot on Sony A7IV, 50mm f/1.8"
+
+
+def _light_for(role) -> str:
+    r = role.value if hasattr(role, "value") else str(role)
+    return _LIGHT_BY_ROLE.get(r, "soft natural window light")
+
+
+def _camera_for(shot_type: str) -> str:
+    return _CAMERA_BY_SHOT.get(shot_type, "50mm f/2, natural depth, at eye level")
+
+
+def _symbol_from_event(event: str, rtype: RepresentationType) -> str:
+    """Símbolo ALINEADO con el evento (no el genérico del tipo), para que la
+    frase 'The story is carried by <símbolo>' no contradiga el evento."""
+    e = (event or "").lower()
+    if any(w in e for w in ("door", "doorway", "threshold", "step")):
+        return "a half-open door with light on the other side"
+    if any(w in e for w in ("window", "outside the window")):
+        return "the light at the window"
+    if any(w in e for w in ("table", "desk", "counter")):
+        return "the still object resting on the table"
+    if any(w in e for w in ("bed", "pillow", "blanket")):
+        return "the rumpled bed left untouched"
+    if any(w in e for w in ("book", "page", "reading", "open page", "bible")):
+        return "the open page and the finger resting on it"
+    if any(w in e for w in ("hand", "hands", "finger", "grip")):
+        return "two hands in a patient, familiar action"
+    if any(w in e for w in ("note", "message", "writing", "line", "letter", "phrase")):
+        return "the half-finished line on the page"
+    if any(w in e for w in ("cup", "coffee", "tea")):
+        return "the warm cup held without drinking"
+    if any(w in e for w in ("room", "corner", "living room", "kitchen")):
+        return "the room itself and the quiet it holds"
+    if any(w in e for w in ("plate", "dish", "dishes")):
+        return "the careful stack of clean dishes"
+    if any(w in e for w in ("phone", "ring")):
+        return "the phone left unanswered"
+    return _symbol_for_strategy(rtype)
+
+
 def _compose(brief, event: str, strat: VisualStrategy, rtype: RepresentationType) -> str:
-    """Compone el prompt final reutilizando compose_prompt() vía SceneBrief."""
+    """Compone el prompt final reutilizando compose_prompt() vía SceneBrief.
+
+    V2.4: el brief que llega a compose_prompt() lleva luz por rol, cámara por
+    plano, acción y símbolo COHERENTES con el evento (no los defaults idénticos
+    ni las acciones genéricas de rol que contradecían el evento), y una
+    composición FORMATO-NEUTRA (el framing lo adapta el Proveedor Adapter).
+    """
     import dataclasses
+    # Acción coherente: la del estrategia (mismo beat que el evento) es la
+    # correcta; solo se usa brief.action si el llamador dio una explícita.
+    action = (brief.action or "").strip() or strat.action
+    # Luz/cámara: si el brief viene con los defaults genéricos que hornea
+    # build_scene (o vacío), se sustituyen por luz por rol / cámara por plano.
+    _light = (brief.lighting or "").strip()
+    if not _light or _light == _GENERIC_DEFAULT_LIGHT:
+        _light = _light_for(brief.narrative_role)
+    _cam = (brief.camera or "").strip()
+    if not _cam or _cam == _GENERIC_DEFAULT_CAMERA:
+        _cam = _camera_for(strat.shot_type)
     clone = dataclasses.replace(
         brief,
         visual_event=event,
-        action=brief.action or strat.action,
+        action=action,
         setting=brief.setting or strat.setting,
+        lighting=_light,
+        camera=_cam,
         composition=brief.composition or _composition_for(strat.shot_type),
-        symbol=brief.symbol or _symbol_for_strategy(rtype),
+        symbol=brief.symbol or _symbol_from_event(event, rtype),
         subject_priority=brief.subject_priority or strat.subject_type,
     )
     try:
@@ -515,8 +612,14 @@ def _compose(brief, event: str, strat: VisualStrategy, rtype: RepresentationType
 
 
 def _composition_for(shot_type: str) -> str:
+    """Framing FORMATO-NEUTRO de la escena (qué plan, dónde está el sujeto).
+
+    El espacio de texto por FORMATO (9:16 / 16:9) lo añade el Proveedor Adapter
+    (build_quality_prompt) al final; aquí NO se hardcodea 'lower text band' que
+    en 16:9 es la zona equivocada (vertical-only).
+    """
     return {
-        "close-up": "close-up, subject in the lower two-thirds, upper third reserved for text",
-        "medium": "medium shot, subject clear of the lower text band, comfortable headroom",
+        "close-up": "close-up, subject clearly framed in the lower part, air above",
+        "medium": "medium shot, subject off-center with balanced negative space",
         "wide": "wide environmental shot, subject small but clear, balanced negative space",
-    }.get(shot_type, "subject clear of the lower text band, comfortable headroom")
+    }.get(shot_type, "medium shot, subject off-center with balanced negative space")

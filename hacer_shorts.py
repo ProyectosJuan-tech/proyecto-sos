@@ -263,8 +263,34 @@ SHORTS = [
         "prompt": "Person sitting at a desk staring blankly at a computer screen, late evening, only screen light illuminating their face, tired posture, real home office setting, documentary style photograph, natural imperfections, Kodak Portra 400",
         "style": WARM_STYLE,
         "rate": "-8%",
-    },
-    ]
+     },
+     {
+        "id": "fuerzas_seguir",
+        "voices": ["jorge"],
+        "rate": "-8%",
+        "text": ("Señor, dame fuerzas para seguir. [800]\n"
+                 "Señor... [600] aquí estoy. [800]\n"
+                 "Tengo cosas que hacer. [400] Tengo responsabilidades. [400] "
+                 "Quiero seguir adelante. [800]\n"
+                 "Dame fuerzas para continuar. [600]\n"
+                 "Dame paciencia para hacer lo que me corresponde. [600]\n"
+                 "Dame serenidad para no cargar este día más de lo necesario. [800]\n"
+                 "Y cuando me sienta cansado, [600] recuérdame que no estoy solo. [800]\n"
+                 "Acompáñame en lo que voy a hacer. [400] En cada tarea de este día. [800]\n"
+                 "Señor, no te pido que hagas todo por mí. [600] "
+                 "Te pido que estés conmigo mientras yo hago mi parte. [800]\n"
+                 "Dame fuerzas. [400] Dame sabiduría. [400] Dame paz. [400] "
+                 "Y ayúdame a seguir. [800]\n"
+                 "Confío en Ti. [600] Amén. [400]"),
+        "cta": "Si esta oración te dio paz, suscríbete.",
+        "prompt": "Close-up of a person in their fifties with hands gently clasped in prayer over a kitchen table at dawn, warm golden window light streaming in, a small steaming cup of coffee beside them, quiet humble moment before starting the day, intimate observational photography, warm cream and sage tones, photorealistic, high detail, vertical composition",
+        "q": "hands clasped prayer dawn window",
+        "style": WARM_STYLE,
+        "text_mode": "serif",
+        "motion": "zoom-in",
+        "bgm": True,
+     },
+     ]
 
 
 def download_ai(prompt, out_path, seed=None, style=""):
@@ -315,11 +341,19 @@ def build_short(short, vkey):
     sid = short["id"]
     img_path = os.path.join(d["imgs"], f"{sid}.jpg")
     if not (os.path.exists(img_path) and os.path.getsize(img_path) > 5000):
-        try:
-            download_ai(short["prompt"], img_path, seed=411, style=short["style"])
-        except Exception as e:
-            print(f"  IA falló, uso Commons: {e}", flush=True)
-            m.download_image({"q": short.get("q")}, img_path)
+        tema = short.get("q") or short.get("prompt")
+        cached = m.buscar_recurso("jpg", tema)
+        if cached:
+            from shutil import copyfile
+            copyfile(cached, img_path)
+            print(f"  imagen reusada del caché local: {os.path.basename(cached)}", flush=True)
+        else:
+            try:
+                download_ai(short["prompt"], img_path, seed=411, style=short["style"])
+            except Exception as e:
+                print(f"  IA falló, uso Commons: {e}", flush=True)
+                m.download_image({"q": short.get("q")}, img_path)
+            m.guardar_recurso(img_path, tema, "jpg")
     m.strip_img_metadata(img_path)
 
     from shutil import copyfile
@@ -357,7 +391,7 @@ def build_short(short, vkey):
         if "<" in raw_text:
             clean_text, emphasis_map = m.parse_html_emphasis(raw_text)
         else:
-            emphasis_map = {}
+            clean_text, emphasis_map = raw_text, {}
         clean_text, clean_styles, line_breaks = m.parse_karaoke_styles(clean_text)
     use_styles = bool(clean_styles and any(s for s in clean_styles))
 
@@ -368,12 +402,15 @@ def build_short(short, vkey):
                                   rate=short.get("rate", "+0%")))
 
     tj = os.path.join(d["tmp"], f"{sid}_{vkey}{m.tts_engine_tag(v['voice'])}_{zlib.crc32(raw_full.encode())}_timings.json")
+    karaoke_clean = clean_text
+    if m.has_pauses(clean_text):
+        _, _chunks, karaoke_clean = m.split_pauses(clean_text)
     if os.path.exists(tj):
         timings = [tuple(x) for x in json.load(open(tj))]
     else:
-        timings = m.align_words(clean_text, wav)
+        timings = m.align_words(karaoke_clean, wav)
         if timings is None:
-            toks = clean_text.split()
+            toks = karaoke_clean.split()
             dur = m.probe_duration(wav)
             step = dur / len(toks)
             timings = [(w, i * step, (i + 1) * step) for i, w in enumerate(toks)]
@@ -391,6 +428,7 @@ def build_short(short, vkey):
         mixed = mp4 + ".bgm.mp4"
         m.mix_bgm(mp4, bgm, mixed)
         os.replace(mixed, mp4)
+    m.limpiar_metadata_video(mp4)
     total = m.probe_duration(mp4)
     check_meta_rules(short, timings, total)
     print(f"OK {mp4} {total:.1f}s", flush=True)

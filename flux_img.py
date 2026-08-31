@@ -43,6 +43,7 @@ Para forzar un proveedor: flux_img.generate(..., provider="gemini") o env IMG_PR
 """
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import random
@@ -51,12 +52,72 @@ from pathlib import Path
 
 import httpx
 
+from consumption import incr  # contabilidad de consumo (módulo de auditoría)
+
 _TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hf_token.txt")
 _GEMINI_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gemini_key.txt")
 _CF_ACCT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cf_account_id.txt")
 _CF_TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cf_token.txt")
 _GEMINI_MODEL = "gemini-2.5-flash-image"
 DEFAULT_ASPECT = "9:16"
+
+# ─────────────────────────────────────────────
+# Caché hash de imágenes (optimización de consumo IA)
+# Clave = hash(prompt + seed + aspect). Si el archivo de salida existe y el
+# manifest `scene_keys.json` registra ese fingerprint, se reutiliza sin volver
+# a llamar al proveedor. Se invalida explícitamente por escena (force/clear).
+# ─────────────────────────────────────────────
+_AI_CACHE_ENABLED = os.environ.get("AI_CACHE", "1") != "0"
+_MANIFEST_NAME = "scene_keys.json"
+
+
+def _fingerprint(prompt: str, seed, aspect: str) -> str:
+    raw = f"{seed}|{aspect}|{prompt}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _manifest_path(out_path: str | Path) -> Path:
+    return Path(out_path).parent / _MANIFEST_NAME
+
+
+def _load_manifest(out_path: str | Path) -> dict:
+    p = _manifest_path(out_path)
+    if p.exists():
+        try:
+            return json.loads(p.read_text("utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_manifest(out_path: str | Path, manifest: dict) -> None:
+    try:
+        _manifest_path(out_path).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), "utf-8")
+    except Exception:
+        pass
+
+
+def image_cache_lookup(out_path: str | Path) -> str | None:
+    """Devuelve el fingerprint cacheado para `out_path` o None (no cacheado)."""
+    if not _AI_CACHE_ENABLED:
+        return None
+    m = _load_manifest(out_path)
+    return m.get(str(Path(out_path).name))
+
+
+def invalidate(out_path: str | Path, scene_id: str | None = None) -> None:
+    """Invalida la entrada de caché para `out_path`.
+
+    Si `scene_id` se pasa, elimina la entrada de ese nombre; si no, elimina el
+    archivo de salida + su entrada (obliga a regenerar). Devuelve None.
+    """
+    m = _load_manifest(out_path)
+    if scene_id is not None:
+        m.pop(str(scene_id), None)
+    else:
+        m.pop(str(Path(out_path).name), None)
+    _save_manifest(out_path, m)
 
 # (width, height) nativos por proveedor (9:16 vertical)
 IMG_WIDTH, IMG_HEIGHT = 1080, 1920
@@ -416,13 +477,15 @@ async def _generate_async(prompt, out_path, seed, width, height, provider=None):
 
 
 def generate(prompt, out_path, aspect=DEFAULT_ASPECT, retries=2, wait=20,
-             provider=None, seed=None):
+             provider=None, seed=None, use_cache=True, force=False):
     """Genera una imagen con cascada de proveedores. Devuelve out_path o lanza
     RuntimeError si ninguno responde (el caller cae a Wikimedia Commons).
     provider: nombre del proveedor a forzar (ej. "gemini", "cloudflare", ...);
     también se lee de la env IMG_PROVIDER.
     seed: fijar para consistencia de personaje entre escenas (mismo seed +
-    mismo prompt = misma imagen; mismo seed + distinta escena = mismo rostro)."""
+    mismo prompt = misma imagen; mismo seed + distinta escena = mismo rostro).
+    use_cache/force: control del caché hash (optimización de consumo); con
+    force=True se ignora el caché y se regenera, actualizando el manifest."""
     width, height = IMG_WIDTH, IMG_HEIGHT
     if aspect == "16:9":
         width, height = 1920, 1080
@@ -430,15 +493,34 @@ def generate(prompt, out_path, aspect=DEFAULT_ASPECT, retries=2, wait=20,
         width, height = 1024, 1024
 
     provider = provider or os.environ.get("IMG_PROVIDER", "").strip() or None
+
+    out_path = Path(out_path)
+    fp = _fingerprint(prompt, seed, aspect)
+    fname = out_path.name
+
+    # 1) Cache hit: mismo prompt+seed+aspect y el archivo ya existe.
+    if use_cache and not force and _AI_CACHE_ENABLED:
+        cached = _load_manifest(out_path).get(fname)
+        if cached == fp and out_path.exists() and os.path.getsize(out_path) > 5000:
+            incr("ai_image.cache_hits")
+            return str(out_path)
+        incr("ai_image.cache_misses")
+
+    # 2) Regenerar.
     last = None
     for attempt in range(retries):
         try:
             s = seed if seed is not None else attempt * 101
             result = asyncio.run(
-                _generate_async(prompt, Path(out_path), s, width, height,
+                _generate_async(prompt, out_path, s, width, height,
                                 provider=provider))
             if result is not None and os.path.getsize(out_path) > 5000:
-                return out_path
+                # Registrar fingerprint en el manifest para futuras reutilizaciones.
+                manifest = _load_manifest(out_path)
+                manifest[fname] = fp
+                _save_manifest(out_path, manifest)
+                incr("ai_image.requests")
+                return str(out_path)
             last = "todos los proveedores fallaron"
         except Exception as e:
             last = str(e)
@@ -446,6 +528,7 @@ def generate(prompt, out_path, aspect=DEFAULT_ASPECT, retries=2, wait=20,
             import time
             time.sleep(wait)
     raise RuntimeError(f"HF no generó imagen: {last}")
+
 
 
 if __name__ == "__main__":

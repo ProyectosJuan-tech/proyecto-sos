@@ -95,6 +95,13 @@ referencias_visuales/thumbnails/*.jpg
 referencias_visuales/thumbnails/*.png
 
 # ============================================
+# RECURSOS LOCALES NO PUBLICABLES
+# ============================================
+RECURSOS_VISUALES_PARA_VIDEOS_Y_SHORTS/
+¿PORQUÉ?/
+cache/
+
+# ============================================
 # CACHE / BUILD / TEMP
 # ============================================
 __pycache__/
